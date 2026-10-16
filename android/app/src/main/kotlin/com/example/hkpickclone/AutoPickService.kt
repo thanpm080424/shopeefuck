@@ -912,11 +912,12 @@ class AutoPickService : AccessibilityService() {
             normalized.contains("kinh nghiem")) {
             return false
         }
-        // Tuyệt đối không bấm xác nhận nếu là thông báo ký quỹ / nạp thêm tiền
-        if (normalized.contains("ky quy") || normalized.contains("ki quy") ||
-            normalized.contains("nap them") || normalized.contains("can nap") ||
-            normalized.contains("so du khong du") || normalized.contains("khong du ky quy") ||
-            normalized.contains("nap tien")) {
+        // Tuyệt đối không bấm xác nhận nếu là thông báo ký quỹ / nạp thêm tiền (loại trừ 'Ví ký quỹ' trên thanh tiêu đề)
+        val withoutWalletHeader = normalized.replace(Regex("(?i)vi\\s*k[y|i]\\s*quy"), "").replace(Regex("(?i)so\\s*du\\s*vi"), "")
+        if (withoutWalletHeader.contains("yeu cau ky quy") || withoutWalletHeader.contains("don ky quy") ||
+            withoutWalletHeader.contains("nap them tien") || withoutWalletHeader.contains("can nap tien") ||
+            withoutWalletHeader.contains("so du khong du") || withoutWalletHeader.contains("khong du ky quy") ||
+            withoutWalletHeader.contains("can ky quy")) {
             return false
         }
         val hasDialogQuery = normalized.contains("ban co muon") || 
@@ -1970,12 +1971,14 @@ class AutoPickService : AccessibilityService() {
             lowerRawText.contains("that bai") ||
             (lowerRawText.contains("khong the nhan") && !lowerRawText.contains("nhan don")) ||
             lowerRawText.contains("chua the nhan") ||
-            lowerRawText.contains("gioi han nhan don")
+            lowerRawText.contains("gioi han nhan don") ||
+            lowerRawText.contains("da hieu")
         )
 
         if (isMissedOrderPopup) {
             isWaitingOrderResult = false
             awaitingPopupConfirmation = false
+            lastAcceptedTime = 0L
             Log.i("HK_BENCHMARK", "MISSED_ORDER_POPUP_DETECTED: Bấm Xác nhận/Đã hiểu để đóng dialog!")
             dismissMissedOrderDialog(rootNode)
 
@@ -2044,8 +2047,7 @@ class AutoPickService : AccessibilityService() {
             val popupConfirmed = clickOrderConfirmationPopup(rootNode)
             if (popupConfirmed) {
                 awaitingPopupConfirmation = false
-                isWaitingOrderResult = true
-                orderResultWaitDeadline = System.currentTimeMillis() + 8000L
+                isWaitingOrderResult = false
                 lastAcceptedTime = System.currentTimeMillis()
                 if (pendingDecisionKey.isNotEmpty()) {
                     recentlyAcceptedKeys[pendingDecisionKey] = System.currentTimeMillis() + 5000L
@@ -2053,7 +2055,7 @@ class AutoPickService : AccessibilityService() {
                 flashScreenSuccess()
                 playAlertSound()
                 Log.i("HK_BENCHMARK", "POPUP_SECOND_CLICK_SUCCESS key=$pendingDecisionKey (wasAwaiting=$awaitingPopupConfirmation, dialogVisible=$isPopupDialogVisible)")
-                pausePollingUntil = System.currentTimeMillis() + 150L
+                pausePollingUntil = System.currentTimeMillis() + 1200L
                 return
             } else if (isPopupDialogVisible) {
                 // Popup đang hiển thị trên màn hình nhưng Accessibility chưa nhặt được nút -> Tap trực tiếp tọa độ chuẩn
@@ -2069,24 +2071,13 @@ class AutoPickService : AccessibilityService() {
                 dispatchGesture(gesture, null, null)
                 Log.i("HK_BENCHMARK", "POPUP_FALLBACK_TAP_DISPATCHED at ($tapX, $tapY)")
                 awaitingPopupConfirmation = false
-                isWaitingOrderResult = true
-                orderResultWaitDeadline = System.currentTimeMillis() + 8000L
-                pausePollingUntil = System.currentTimeMillis() + 150L
+                isWaitingOrderResult = false
+                lastAcceptedTime = System.currentTimeMillis()
+                pausePollingUntil = System.currentTimeMillis() + 1200L
                 return
             } else if (nowForConfirmDialog - firstAcceptClickTime < 3000L) {
                 // Đang chờ popup render, nghỉ 40ms rồi quét tiếp
                 pausePollingUntil = nowForConfirmDialog + 40L
-                return
-            }
-        }
-
-        // Nếu đang chờ kết quả nhận đơn từ ShopeeFood (sau khi bấm xác nhận lần 2)
-        if (isWaitingOrderResult) {
-            if (nowForConfirmDialog > orderResultWaitDeadline) {
-                isWaitingOrderResult = false
-                Log.i("HK_BENCHMARK", "ORDER_RESULT_WAIT_TIMEOUT -> resumed normal scanning")
-            } else {
-                pausePollingUntil = nowForConfirmDialog + 60L
                 return
             }
         }
@@ -2140,7 +2131,7 @@ class AutoPickService : AccessibilityService() {
                             if (parent != null) {
                                 val pRect = android.graphics.Rect()
                                 parent.getBoundsInScreen(pRect)
-                                if (pRect.height() > screenHeight * 0.7f) break 
+                                if (pRect.height() > screenHeight * 0.7f || pRect.top < screenHeight * 0.08f) break 
                                 cardContainer = parent
                             } else {
                                 break
@@ -2267,6 +2258,9 @@ class AutoPickService : AccessibilityService() {
 
 
         if (foundOrder) {
+            // Khi đã tìm thấy thẻ đơn trên màn hình, chắc chắn các popup trước đã đóng -> reset chốt chặn
+            isWaitingOrderResult = false
+            awaitingPopupConfirmation = false
 
             val nowMs = System.currentTimeMillis()
 
@@ -2358,9 +2352,7 @@ class AutoPickService : AccessibilityService() {
 
                 resultMsg = "⛔ BỎ QUA ĐƠN HẾT HẠN (8 GIÂY)"
 
-            } else if (screenTextLower.contains("nap them tien") || screenTextLower.contains("ky quy") ||
-                       screenTextLower.contains("can nap") || screenTextLower.contains("khong du ky quy") ||
-                       screenTextLower.contains("so du khong du") || screenTextLower.contains("yeu cau ky quy")) {
+            } else if (isDepositOrder(finalCardText)) {
 
                 resultMsg = "⛔ ĐƠN KÝ QUỸ / CẦN NẠP TIỀN → BỎ ❌"
 
@@ -3391,10 +3383,9 @@ class AutoPickService : AccessibilityService() {
         var savedAcceptNode = savedAcceptNodeParam
         val now = System.currentTimeMillis()
 
-        if (isWaitingOrderResult || awaitingPopupConfirmation) {
-            return
-        }
-        if (now - lastAcceptedTime < 3500L) {
+        // Khóa không cho bấm nhận đơn mới trong 3.5 giây để chờ chốt đơn và Load xong!
+        // Chỉ áp dụng khi KHÔNG đang chờ popup xác nhận
+        if (!awaitingPopupConfirmation && now - lastAcceptedTime < 3500L) {
             return
         }
 
@@ -4142,60 +4133,63 @@ class AutoPickService : AccessibilityService() {
 
     }
 
-    private fun isDepositOrder(cardText: String, fullText: String, rootNode: AccessibilityNodeInfo? = null): Boolean {
-        val textToCheck = if (cardText.isNotEmpty()) cardText else fullText
-        val raw = textToCheck.lowercase()
-        val clean = removeAccents(textToCheck).replace(Regex("\\s+"), " ").lowercase()
+    private fun isDepositOrder(cardText: String, fullText: String = "", rootNode: AccessibilityNodeInfo? = null): Boolean {
+        if (cardText.isBlank()) return false
+        val clean = removeAccents(cardText).replace(Regex("\\s+"), " ").lowercase()
+        // Tuyệt đối loại bỏ phần tiêu đề "Ví ký quỹ" / "Số dư ví" trên thanh trạng thái Shopee
+        val safe = clean.replace(Regex("(?i)vi\\s*k[y|i]\\s*quy"), "")
+            .replace(Regex("(?i)so\\s*du\\s*vi"), "")
+            .replace(Regex("(?i)tai\\s*khoan"), "")
 
-        // Kiểm tra từ khóa ký quỹ chính xác trên thẻ đơn
-        if (raw.contains("ký quỹ") || raw.contains("kí quỹ") || raw.contains("nạp thêm tiền") ||
-            raw.contains("tiền ký quỹ") || raw.contains("không đủ ký quỹ") || raw.contains("yêu cầu ký quỹ") ||
-            raw.contains("số dư không đủ") || raw.contains("đơn ký quỹ") || raw.contains("đơn kí quỹ") ||
-            clean.contains("ky quy") || clean.contains("ki quy") || clean.contains("nap them tien") ||
-            clean.contains("can ky quy") || clean.contains("tien ky quy") || clean.contains("tien ki quy") ||
-            clean.contains("khong du ky quy") || clean.contains("yeu cau ky quy") || clean.contains("so du khong du") ||
-            clean.contains("don ky quy") || clean.contains("don ki quy")) {
-            return true
-        }
-
-        return false
+        // Chỉ kiểm tra từ khóa ký quỹ chính xác của đơn hàng (không kiểm tra từ trơ 'ky quy')
+        return safe.contains("don ky quy") || safe.contains("don ki quy") ||
+               safe.contains("can ky quy") || safe.contains("can ki quy") ||
+               safe.contains("yeu cau ky quy") || safe.contains("yeu cau ki quy") ||
+               safe.contains("tien ky quy") || safe.contains("tien ki quy") ||
+               safe.contains("khong du ky quy") || safe.contains("khong du ki quy") ||
+               safe.contains("so du khong du") || safe.contains("so du k du") ||
+               safe.contains("nap them tien") || safe.contains("can nap tien") ||
+               safe.contains("ky quy:") || safe.contains("ki quy:")
     }
 
-    private fun isCodOnlyOrder(cardText: String, fullText: String, rootNode: AccessibilityNodeInfo? = null): Boolean {
-        val textToCheck = if (cardText.isNotEmpty()) cardText else fullText
-        val raw = textToCheck.lowercase()
-        val clean = removeAccents(textToCheck).replace(Regex("\\s+"), " ").lowercase()
+    private fun isCodOnlyOrder(cardText: String, fullText: String = "", rootNode: AccessibilityNodeInfo? = null): Boolean {
+        if (cardText.isBlank()) return false
+        val clean = removeAccents(cardText).replace(Regex("\\s+"), " ").lowercase()
 
-        // Kiểm tra từ khóa Ứng tiền / Thu hộ / Thu tiền
-        if (raw.contains("ứng tiền") || raw.contains("tạm ứng") || 
-            raw.contains("thu hộ") || raw.contains("thu tiền") ||
-            clean.contains("ung tien") || clean.contains("tam ung") || 
-            clean.contains("tien ung") || clean.contains("thu ho") || 
-            clean.contains("thu tien")) {
+        // Kiểm tra từ khóa Ứng tiền / Thu hộ / Tạm ứng
+        if (clean.contains("ung tien") || clean.contains("tam ung") || 
+            clean.contains("tien ung") || clean.contains("thu ho")) {
             return true
         }
 
-        // Kiểm tra từ khóa COD (trừ trường hợp "0 cod", "khong cod")
-        val hasCod = clean.contains("cod") || raw.contains("cod")
+        // Kiểm tra mục Thu tiền (loại trừ thu 0đ, thu 0k)
+        if (clean.contains("thu tien") || clean.contains("thu:")) {
+            val isZeroThu = clean.contains("thu: 0") || clean.contains("thu: 0k") || 
+                            clean.contains("thu: 0d") || clean.contains("thu 0d") ||
+                            clean.contains("thu: 0 vnd") || clean.contains("thu 0 vnd")
+            if (!isZeroThu) return true
+        }
+
+        // Kiểm tra từ khóa COD (trừ trường hợp "0 cod", "khong cod", "khong thu cod")
+        val hasCod = clean.contains("cod")
         if (hasCod) {
             val isZeroCod = clean.contains("0 cod") || 
                             clean.contains("khong cod") || 
                             clean.contains("khong thu cod") ||
                             clean.contains("cod: 0") ||
                             clean.contains("cod 0") ||
-                            raw.contains("0 cod") ||
-                            raw.contains("không cod")
+                            clean.contains("0d cod") ||
+                            clean.contains("0k cod")
             if (!isZeroCod) return true
         }
 
         // Kiểm tra mục Thu tiền: "Thu: ***" hoặc "Thu: [số > 0]"
         if (clean.contains("thu: ***") || clean.contains("thu:***") || clean.contains("thu ***") ||
-            clean.contains("thu : ***") || clean.contains("thu :***") ||
-            raw.contains("thu: ***") || raw.contains("thu:***") || raw.contains("thu ***")) {
+            clean.contains("thu : ***") || clean.contains("thu :***")) {
             return true
         }
 
-        val codAmount = extractCodAmount(textToCheck) ?: 0.0
+        val codAmount = extractCodAmount(cardText) ?: 0.0
         if (codAmount > 0.0) {
             return true
         }
