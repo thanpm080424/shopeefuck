@@ -1,0 +1,10 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Releases are served through a short-lived URL issued by an authenticated
+    // Cloud Function after server-side license validation.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

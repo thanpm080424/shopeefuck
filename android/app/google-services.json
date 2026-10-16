@@ -1,0 +1,76 @@
+{
+  "project_info": {
+    "project_number": "106684427500",
+    "project_id": "gymthan-b1495",
+    "storage_bucket": "gymthan-b1495.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:106684427500:android:e64a7885188a330a3709c9",
+        "android_client_info": {
+          "package_name": "com.example.gymthan"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "106684427500-nnijf8qq0k2v0peha2983vuiac4u1ba7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.gymthan",
+            "certificate_hash": "8573231122d1dfa98dabab5d19d45983f84ce49c"
+          }
+        },
+        {
+          "client_id": "106684427500-2ffo9rlmv47cn8io960h30f6ggiae3l6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHnZaNgQsQEiUgt2nRnEfDzaYWO3T6Dr8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "106684427500-2ffo9rlmv47cn8io960h30f6ggiae3l6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:106684427500:android:7d90917820d544ce3709c9",
+        "android_client_info": {
+          "package_name": "com.samsung.health.addon"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "106684427500-2ffo9rlmv47cn8io960h30f6ggiae3l6.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCHnZaNgQsQEiUgt2nRnEfDzaYWO3T6Dr8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "106684427500-2ffo9rlmv47cn8io960h30f6ggiae3l6.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
