@@ -2161,21 +2161,25 @@ class AutoPickService : AccessibilityService() {
                                     finalDistance = d
                                     finalCardText = cardText
 
-                                    val acceptNodes = cardContainer.findAccessibilityNodeInfosByText("Nhận đơn")
-                                    val realAcceptNode = acceptNodes?.firstOrNull { isRealAcceptButton(it) }
-
-                                    if (realAcceptNode != null) {
-                                        val bounds = android.graphics.Rect()
-                                        realAcceptNode.getBoundsInScreen(bounds)
-                                        targetRect = bounds
-                                        savedAcceptNode = realAcceptNode
-                                        for (an in acceptNodes) {
-                                            if (an !== realAcceptNode) {
-                                                try { an.recycle() } catch (_: Exception) {}
+                                    val acceptLabels = listOf("Nhận đơn", "NHẬN ĐƠN", "Nhận", "Lấy đơn")
+                                    var realAcceptNode: AccessibilityNodeInfo? = null
+                                    for (lbl in acceptLabels) {
+                                        val acceptNodes = cardContainer.findAccessibilityNodeInfosByText(lbl)
+                                        realAcceptNode = acceptNodes?.firstOrNull { isRealAcceptButton(it) }
+                                        if (realAcceptNode != null) {
+                                            val bounds = android.graphics.Rect()
+                                            realAcceptNode.getBoundsInScreen(bounds)
+                                            targetRect = bounds
+                                            savedAcceptNode = realAcceptNode
+                                            for (an in acceptNodes) {
+                                                if (an !== realAcceptNode) {
+                                                    try { an.recycle() } catch (_: Exception) {}
+                                                }
                                             }
+                                            break
+                                        } else {
+                                            acceptNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
                                         }
-                                    } else {
-                                        acceptNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
                                     }
                                 }
                             }
@@ -2199,28 +2203,41 @@ class AutoPickService : AccessibilityService() {
             }
         }
 
-        // 2. NẾU KHÔNG CÓ MỎ NEO: KIỂM TRA THÔNG BÁO HẾT ĐƠN ĐỂ BẤM LOAD HOẶC QUAY LẠI CHỌN ĐƠN NGON
+        // 2. NẾU KHÔNG CÓ MỎ NEO: KIỂM TRA THÔNG BÁO HẾT ĐƠN (PHÂN BIỆT RẠCH RÒI TRẠNG THÁI A & B)
         if (!foundOrder && rootNode != null) {
-            val emptyKw = listOf("Không còn", "free-pick", "Free-pick")
-            var isEmptyScreen = false
+            val emptyKw = listOf("Không còn", "free-pick", "Free-pick", "Tải lại", "tải lại")
+            var isStateA = false // "Không còn đơn hàng nào" / "Tải lại trang"
+            var isStateB = false // "Hiện đang không có đơn thuộc dạng free-pick"
             for (kw in emptyKw) {
                 val nodes = try { rootNode.findAccessibilityNodeInfosByText(kw) } catch (_: Exception) { null }
                 if (!nodes.isNullOrEmpty()) {
                     for (n in nodes) {
                         val txt = removeAccents((n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()).lowercase()
-                        if (txt.contains("khong con don hang nao") || txt.contains("khong co don thuoc dang free-pick") || txt.contains("khong co don")) {
-                            isEmptyScreen = true
+                        if (txt.contains("khong co don thuoc dang free-pick")) {
+                            isStateB = true
+                        } else if (txt.contains("khong con don hang nao") || txt.contains("tai lai trang")) {
+                            isStateA = true
                         }
                         try { n.recycle() } catch (_: Exception) {}
                     }
                 }
-                if (isEmptyScreen) break
+                if (isStateB || isStateA) break
             }
-            if (isEmptyScreen) {
+            if (isStateB) {
+                // Trạng thái B: Khu vực hoàn toàn không có đơn free-pick
+                // CẢNH BÁO: TUYỆT ĐỐI KHÔNG CLICK VÀO LINK "Xem bí quyết tăng tỉ lệ nhận đơn tại đây"!
+                // CHỈ bấm vào tọa độ hồng tâm nút LOAD (targetRefresh).
+                Log.i("HK_BENCHMARK", "EMPTY_STATE_B: Khong co don free-pick -> Chi bam nut Load Target (bo qua link bi quyet)")
+                resetBestOrderState()
+                tapRefreshTarget()
+                return
+            } else if (isStateA) {
+                // Trạng thái A: Đã vuốt hết các đơn trong danh sách
+                Log.i("HK_BENCHMARK", "EMPTY_STATE_A: Khong con don hang nao")
                 if (selectBestOrderEnabled) {
-                    handleEndOfDeckOrEmptyScreen()
+                    handleEndOfDeckOrEmptyScreen(rootNode)
                 } else {
-                    tapRefreshTarget()
+                    clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
                 return
             }
@@ -2530,7 +2547,7 @@ class AutoPickService : AccessibilityService() {
 
                             var dropOffText = ""
 
-                            val dropKeywords = listOf("diem ket thuc", "ket thuc", "giao hang", "giao den", "diem giao", "nguoi nhan")
+                            val dropKeywords = listOf("diem ket thuc", "ket thuc", "giao hang", "giao den", "diem giao", "giao:", "giao", "nguoi nhan")
 
                             var startIdx = -1
 
@@ -2680,7 +2697,7 @@ class AutoPickService : AccessibilityService() {
 
                 var dropOffText = ""
 
-                val dropKeywords = listOf("diem ket thuc", "ket thuc", "giao hang", "giao den", "diem giao", "nguoi nhan")
+                val dropKeywords = listOf("diem ket thuc", "ket thuc", "giao hang", "giao den", "diem giao", "giao:", "giao", "nguoi nhan")
 
                 var startIndex = -1
 
@@ -3092,19 +3109,26 @@ class AutoPickService : AccessibilityService() {
             isWaitingToSwipe = false
 
             val lowerFullText = removeAccents(currentAllText.lowercase())
-            val isEmptyMsg1 = lowerFullText.contains("khong con don hang nao")
-            val isEmptyMsg2 = lowerFullText.contains("khong co don thuoc dang free-pick")
-            val isEndOfDeck = isEmptyMsg1 || isEmptyMsg2 || lowerFullText.contains("tai lai trang")
+            val isStateB = lowerFullText.contains("khong co don thuoc dang free-pick")
+            val isStateA = lowerFullText.contains("khong con don hang nao") || lowerFullText.contains("tai lai trang")
 
-            if (isEndOfDeck) {
+            if (isStateB) {
+                // Trạng thái B: Khu vực hoàn toàn không có đơn free-pick
+                // TUYỆT ĐỐI KHÔNG CLICK VÀO LINK "Xem bí quyết...", CHỈ BẤM HỒNG TÂM NÚT LOAD
+                Log.i("HK_BENCHMARK", "EMPTY_STATE_B_FULLTEXT: Khong co don free-pick -> Chi bam nut Load Target")
+                resetBestOrderState()
+                tapRefreshTarget()
+            } else if (isStateA) {
+                // Trạng thái A: Đã vuốt hết các đơn trong danh sách
+                Log.i("HK_BENCHMARK", "EMPTY_STATE_A_FULLTEXT: Khong con don hang nao")
                 if (selectBestOrderEnabled) {
-                    handleEndOfDeckOrEmptyScreen()
+                    handleEndOfDeckOrEmptyScreen(rootNode)
                 } else {
                     resetBestOrderState()
-                    tapRefreshTarget()
+                    clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
             } else if (selectBestOrderEnabled && bestOrderState == BestOrderState.REVERSING) {
-                handleEndOfDeckOrEmptyScreen()
+                handleEndOfDeckOrEmptyScreen(rootNode)
             }
         }
     }
@@ -3134,7 +3158,7 @@ class AutoPickService : AccessibilityService() {
         bestOrderAttemptCount = 0
     }
 
-    private fun handleEndOfDeckOrEmptyScreen() {
+    private fun handleEndOfDeckOrEmptyScreen(rootNode: AccessibilityNodeInfo? = null) {
         if (selectBestOrderEnabled && bestOrderState == BestOrderState.SCANNING && scannedDeck.isNotEmpty()) {
             // ĐÃ LƯỚT TỚI TRANG CUỐI CÙNG ("Không còn đơn hàng nào. Vui lòng tải lại trang để xem đơn mới.")!
             Log.i("HK_BENCHMARK", "BEST_ORDER_REACHED_LAST_PAGE: Đã lướt tới trang cuối! Tổng số thẻ đã quét: ${scannedDeck.size}")
@@ -3143,7 +3167,7 @@ class AutoPickService : AccessibilityService() {
             if (eligibleOrders.isEmpty()) {
                 Log.i("HK_BENCHMARK", "BEST_ORDER_END_OF_DECK: Không có đơn nào đạt tiêu chuẩn trong ${scannedDeck.size} thẻ đã quét. Bấm tải lại trang!")
                 resetBestOrderState()
-                tapRefreshTarget()
+                clickTaiLaiTrangOrTapRefresh(rootNode)
             } else {
                 // SO SÁNH RIÊNG THEO TỪNG CẤP ĐƠN (1-1, 2-2, 3-3, 4-4, 5-5...):
                 // 1. Tiện chuyến luôn ưu tiên số 1 (nếu có)
@@ -3178,7 +3202,7 @@ class AutoPickService : AccessibilityService() {
             if (bestOrderReverseAttempts > 15) {
                 Log.w("HK_BENCHMARK", "BEST_ORDER_REVERSE_TIMEOUT from empty screen after 15 reverse swipes. Resetting.")
                 resetBestOrderState()
-                tapRefreshTarget()
+                clickTaiLaiTrangOrTapRefresh(rootNode)
             } else {
                 val swipeDuration = dispatchReverseSwipe()
                 val retryDelayMs = if (swipeDuration > 0L) {
@@ -3190,6 +3214,57 @@ class AutoPickService : AccessibilityService() {
             }
         } else {
             resetBestOrderState()
+            clickTaiLaiTrangOrTapRefresh(rootNode)
+        }
+    }
+
+    private fun clickTaiLaiTrangOrTapRefresh(rootNode: AccessibilityNodeInfo?) {
+        var clicked = false
+        if (rootNode != null) {
+            val searchLabels = listOf("Tải lại trang", "Tải lại", "tai lai trang", "tai lai")
+            for (lbl in searchLabels) {
+                val nodes = try { rootNode.findAccessibilityNodeInfosByText(lbl) } catch (_: Exception) { null }
+                if (!nodes.isNullOrEmpty()) {
+                    for (n in nodes) {
+                        val txt = (n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()
+                        val lower = removeAccents(txt.lowercase())
+                        // TUYỆT ĐỐI KHÔNG CLICK VÀO "Xem bí quyết..." hay link web
+                        if (lower.contains("bi quyet") || lower.contains("ti le")) {
+                            try { n.recycle() } catch (_: Exception) {}
+                            continue
+                        }
+                        if (lower.contains("tai lai")) {
+                            val clickable = getClickableNode(n) ?: n
+                            clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                            if (!clicked) {
+                                val bounds = android.graphics.Rect()
+                                n.getBoundsInScreen(bounds)
+                                if (!bounds.isEmpty && bounds.centerX() > 0 && bounds.centerY() > 0) {
+                                    showTouchIndicator(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+                                    val path = Path().apply { moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat()) }
+                                    val gesture = GestureDescription.Builder()
+                                        .addStroke(GestureDescription.StrokeDescription(path, 0, 40)).build()
+                                    clicked = dispatchGesture(gesture, null, null)
+                                }
+                            }
+                            Log.i("HK_BENCHMARK", "CLICK_TAI_LAI_TRANG success=$clicked")
+                        }
+                        try { n.recycle() } catch (_: Exception) {}
+                        if (clicked) break
+                    }
+                }
+                if (clicked) break
+            }
+        }
+        if (clicked) {
+            lastOrderDetectedTime = System.currentTimeMillis() + 6000L
+            lastSwipedCardFingerprint = ""
+            lastSwipedCardExpiresAt = 0L
+            emptyScreenStartTime = 0L
+            pausePollingUntil = 0L
+            resetFreePickConfirmation()
+            lastAcceptedTime = 0L
+        } else {
             tapRefreshTarget()
         }
     }
@@ -3201,6 +3276,8 @@ class AutoPickService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (!force && now - lastRefreshTime < 500L) return
         lastRefreshTime = now
+        resetFreePickConfirmation()
+        lastAcceptedTime = 0L
 
         val x = targetRefresh!!.getCenterX()
         val y = targetRefresh!!.getCenterY()
@@ -3382,6 +3459,23 @@ class AutoPickService : AccessibilityService() {
     ) {
         var savedAcceptNode = savedAcceptNodeParam
         val now = System.currentTimeMillis()
+
+        // Tuyệt đối không bấm nhận nếu thẻ đơn là đơn ký quỹ / nạp tiền (thay nút nhận đơn bằng thanh cam)
+        if (isDepositOrder(finalCardText) || isDepositOrder(allText)) {
+            Log.w("HK_BENCHMARK", "ABORT_ACCEPT: Phat hien don ky quy / can nap tien trong performAcceptOrder! Bo qua, khong click thanh cam.")
+            try { savedAcceptNode?.recycle() } catch (_: Exception) {}
+            savedAcceptNode = null
+            val swipeDuration = swipeByTargets()
+            val retryDelayMs = if (swipeDuration > 0L) {
+                lastSwipedCardFingerprint = swipeFingerprint
+                lastSwipedCardExpiresAt = System.currentTimeMillis() + swipeDuration + 20L
+                swipeDuration + SWIPE_SETTLE_DELAY_MS
+            } else {
+                accessibilityReadIntervalMs().coerceAtLeast(15L)
+            }
+            pausePollingUntil = System.currentTimeMillis() + retryDelayMs
+            return
+        }
 
         // Khóa không cho bấm nhận đơn mới trong 3.5 giây để chờ chốt đơn và Load xong!
         // Chỉ áp dụng khi KHÔNG đang chờ popup xác nhận
@@ -4084,13 +4178,17 @@ class AutoPickService : AccessibilityService() {
     private fun extractDropOffAddress(cardText: String): String? {
         val normalized = removeAccents(cardText).lowercase(java.util.Locale.ROOT)
         val markers = listOf(
+            "diem ket thuc:",
             "diem ket thuc",
+            "ket thuc:",
+            "ket thuc",
             "diem giao hang",
             "diem giao",
             "giao den",
             "giao hang",
-            "nguoi nhan",
-            "ket thuc"
+            "giao:",
+            "giao",
+            "nguoi nhan"
         )
         val markerMatch = markers
             .mapNotNull { marker -> normalized.lastIndexOf(marker).takeIf { it >= 0 }?.let { it to marker } }
@@ -4141,14 +4239,21 @@ class AutoPickService : AccessibilityService() {
             .replace(Regex("(?i)so\\s*du\\s*vi"), "")
             .replace(Regex("(?i)tai\\s*khoan"), "")
 
-        // Chỉ kiểm tra từ khóa ký quỹ chính xác của đơn hàng (không kiểm tra từ trơ 'ky quy')
+        // 1. Nhận diện chính xác thanh cam ở đáy thẻ: "Bạn cần nạp thêm tiền ký quỹ để nhận đơn hàng này."
+        if (safe.contains("nap them tien ky quy") || safe.contains("nap them tien ki quy") ||
+            safe.contains("can nap them tien ky quy") || safe.contains("can nap them tien ki quy") ||
+            safe.contains("can nap them") || safe.contains("nap them tien") || safe.contains("can nap tien") ||
+            safe.contains("ban can nap them")) {
+            return true
+        }
+
+        // 2. Chỉ kiểm tra từ khóa ký quỹ chính xác của đơn hàng (không kiểm tra từ trơ 'ky quy')
         return safe.contains("don ky quy") || safe.contains("don ki quy") ||
                safe.contains("can ky quy") || safe.contains("can ki quy") ||
                safe.contains("yeu cau ky quy") || safe.contains("yeu cau ki quy") ||
                safe.contains("tien ky quy") || safe.contains("tien ki quy") ||
                safe.contains("khong du ky quy") || safe.contains("khong du ki quy") ||
                safe.contains("so du khong du") || safe.contains("so du k du") ||
-               safe.contains("nap them tien") || safe.contains("can nap tien") ||
                safe.contains("ky quy:") || safe.contains("ki quy:")
     }
 
@@ -4156,13 +4261,18 @@ class AutoPickService : AccessibilityService() {
         if (cardText.isBlank()) return false
         val clean = removeAccents(cardText).replace(Regex("\\s+"), " ").lowercase()
 
-        // Kiểm tra từ khóa Ứng tiền / Thu hộ / Tạm ứng
+        // 1. Nhận diện nhãn đơn COD trên thẻ: "1 đơn COD", "2 đơn COD", "đơn COD"...
+        if (clean.contains("don cod") || clean.contains("don hang cod")) {
+            return true
+        }
+
+        // 2. Kiểm tra từ khóa Ứng tiền / Thu hộ / Tạm ứng
         if (clean.contains("ung tien") || clean.contains("tam ung") || 
             clean.contains("tien ung") || clean.contains("thu ho")) {
             return true
         }
 
-        // Kiểm tra mục Thu tiền (loại trừ thu 0đ, thu 0k)
+        // 3. Kiểm tra mục Thu tiền (loại trừ thu 0đ, thu 0k)
         if (clean.contains("thu tien") || clean.contains("thu:")) {
             val isZeroThu = clean.contains("thu: 0") || clean.contains("thu: 0k") || 
                             clean.contains("thu: 0d") || clean.contains("thu 0d") ||
@@ -4170,7 +4280,7 @@ class AutoPickService : AccessibilityService() {
             if (!isZeroThu) return true
         }
 
-        // Kiểm tra từ khóa COD (trừ trường hợp "0 cod", "khong cod", "khong thu cod")
+        // 4. Kiểm tra từ khóa COD (trừ trường hợp "0 cod", "khong cod", "khong thu cod")
         val hasCod = clean.contains("cod")
         if (hasCod) {
             val isZeroCod = clean.contains("0 cod") || 
@@ -4183,7 +4293,7 @@ class AutoPickService : AccessibilityService() {
             if (!isZeroCod) return true
         }
 
-        // Kiểm tra mục Thu tiền: "Thu: ***" hoặc "Thu: [số > 0]"
+        // 5. Kiểm tra mục Thu tiền: "Thu: ***" hoặc "Thu: [số > 0]"
         if (clean.contains("thu: ***") || clean.contains("thu:***") || clean.contains("thu ***") ||
             clean.contains("thu : ***") || clean.contains("thu :***")) {
             return true
