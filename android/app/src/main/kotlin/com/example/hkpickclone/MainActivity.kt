@@ -15,6 +15,11 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!AutoPickService.verifyAppIntegrity(this)) {
+            android.util.Log.e("HK_BENCHMARK", "INTEGRITY_CHECK_FAILED: App signature or package ID is invalid!")
+            finishAffinity()
+            return
+        }
         startService(Intent(this, AppLifecycleService::class.java))
     }
 

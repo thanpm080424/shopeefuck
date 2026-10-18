@@ -196,7 +196,45 @@ class AutoPickService : AccessibilityService() {
 
 
 
+        fun verifyAppIntegrity(context: Context): Boolean {
+            return try {
+                if (context.packageName != "com.samsung.health.addon") {
+                    return false
+                }
+                val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    val pi = context.packageManager.getPackageInfo(
+                        context.packageName,
+                        android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+                    )
+                    pi.signingInfo?.apkContentsSigners ?: pi.signingInfo?.signingCertificateHistory
+                } else {
+                    @Suppress("DEPRECATION")
+                    val pi = context.packageManager.getPackageInfo(
+                        context.packageName,
+                        android.content.pm.PackageManager.GET_SIGNATURES
+                    )
+                    @Suppress("DEPRECATION")
+                    pi.signatures
+                }
+                if (signatures.isNullOrEmpty()) return false
+
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                val digest = md.digest(signatures[0].toByteArray())
+                val hex = digest.joinToString("") { "%02x".format(it) }
+
+                // Danh sách chữ ký hợp lệ: 1. Release Keystore chính chủ; 2. Local Debug Keystore
+                val validDigests = setOf(
+                    "06aed4508e9eb2b4e425f89f28e462558c949cc51ea2e9d146b8ad431b6f3dcd",
+                    "14dffc059b95399cc31f3b6c6170586fa0001aa7bd0532abdac2599ee355b1b5"
+                )
+                validDigests.contains(hex.lowercase())
+            } catch (_: Exception) {
+                false
+            }
+        }
+
         fun checkLicenseValid(context: Context): Boolean {
+            if (!verifyAppIntegrity(context)) return false
             val prefs = context.getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val isActive = prefs.getBoolean("flutter.isActive", false)
             val expireTime = try {
@@ -1151,6 +1189,11 @@ class AutoPickService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        if (!verifyAppIntegrity(this)) {
+            Log.e("HK_BENCHMARK", "INTEGRITY_CHECK_FAILED: App signature or package ID is invalid! Shutting down service.")
+            disableSelf()
+            return
+        }
         instance = this
         isRunning = true
         pickMode = getSharedPreferences("AutoPickPrefs", Context.MODE_PRIVATE)
@@ -3307,6 +3350,7 @@ class AutoPickService : AccessibilityService() {
 
 
     private fun swipeByTargets(): Long {
+        if (!verifyAppIntegrity(this)) return 0L
         if (!isDriverAppForeground()) return 0L
         val metrics = resources.displayMetrics
         val screenWidth = metrics.widthPixels.toFloat()
@@ -3379,6 +3423,7 @@ class AutoPickService : AccessibilityService() {
     }
 
     private fun dispatchReverseSwipe(): Long {
+        if (!verifyAppIntegrity(this)) return 0L
         if (!isDriverAppForeground()) return 0L
         val metrics = resources.displayMetrics
         val screenWidth = metrics.widthPixels.toFloat()
@@ -3459,6 +3504,11 @@ class AutoPickService : AccessibilityService() {
     ) {
         var savedAcceptNode = savedAcceptNodeParam
         val now = System.currentTimeMillis()
+
+        if (!verifyAppIntegrity(this)) {
+            Log.e("HK_BENCHMARK", "ABORT_ACCEPT: Integrity check failed!")
+            return
+        }
 
         // Tuyệt đối không bấm nhận nếu thẻ đơn là đơn ký quỹ / nạp tiền (thay nút nhận đơn bằng thanh cam)
         if (isDepositOrder(finalCardText) || isDepositOrder(allText)) {
