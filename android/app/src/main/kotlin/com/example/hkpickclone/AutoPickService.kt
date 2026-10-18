@@ -196,9 +196,14 @@ class AutoPickService : AccessibilityService() {
 
 
 
+        private fun unmask(m: String, k: Int = 0x5A): String {
+            return m.map { (it.code xor k).toChar() }.joinToString("")
+        }
+
         fun verifyAppIntegrity(context: Context): Boolean {
             return try {
-                if (context.packageName != "com.samsung.health.addon") {
+                val pkgTarget = unmask("957t);7)/4=t2?;6.2t;>>54", 0x5A) // com.samsung.health.addon
+                if (context.packageName != pkgTarget) {
                     return false
                 }
                 val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
@@ -222,10 +227,10 @@ class AutoPickService : AccessibilityService() {
                 val digest = md.digest(signatures[0].toByteArray())
                 val hex = digest.joinToString("") { "%02x".format(it) }
 
-                // Danh sách chữ ký hợp lệ: 1. Release Keystore chính chủ; 2. Local Debug Keystore
+                // Danh sách chữ ký hợp lệ (Đã mã hóa XOR, không để lộ chuỗi gốc trong file DEX):
                 val validDigests = setOf(
-                    "06aed4508e9eb2b4e425f89f28e462558c949cc51ea2e9d146b8ad431b6f3dcd",
-                    "14dffc059b95399cc31f3b6c6170586fa0001aa7bd0532abdac2599ee355b1b5"
+                    unmask("jl;?>nojb?c?8h8n?nho<bc<hb?nlhoob9cnc99ok?;h?c>knl8b;>nik8l<i>9>"), // Release Keystore
+                    unmask("kn><<9joc8coicc99ik<i8l9lkmjobl<;jjjk;;m8>joih;8>;9hocc??ioo8k8o")  // Debug Keystore
                 )
                 validDigests.contains(hex.lowercase())
             } catch (_: Exception) {
@@ -3512,7 +3517,7 @@ class AutoPickService : AccessibilityService() {
 
         // Tuyệt đối không bấm nhận nếu thẻ đơn là đơn ký quỹ / nạp tiền (thay nút nhận đơn bằng thanh cam)
         if (isDepositOrder(finalCardText) || isDepositOrder(allText)) {
-            Log.w("HK_BENCHMARK", "ABORT_ACCEPT: Phat hien don ky quy / can nap tien trong performAcceptOrder! Bo qua, khong click thanh cam.")
+            Log.w("HK_BENCHMARK", "ABORT_ACCEPT: Phat hien don ky quy / can nap tien! Bo qua, khong click thanh cam.")
             try { savedAcceptNode?.recycle() } catch (_: Exception) {}
             savedAcceptNode = null
             val swipeDuration = swipeByTargets()
