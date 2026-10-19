@@ -831,6 +831,8 @@ class AutoPickService : AccessibilityService() {
     @Volatile var lastSwipedCardExpiresAt = 0L
     @Volatile var pausePollingUntil = 0L
     @Volatile private var lastIdleLogTime = 0L
+    @Volatile private var lastRejectedFingerprint = ""
+    @Volatile private var rejectedRepeatCount = 0
 
     private fun accessibilityReadIntervalMs(): Long {
         return if (speedLevel >= 3) 1L else if (speedLevel == 2) 20L else 40L
@@ -922,9 +924,9 @@ class AutoPickService : AccessibilityService() {
         if (text.isBlank()) return false
         val lower = removeAccents(text).lowercase()
         if (lower.contains("sau khi hoan thanh")) return true
-        if (lower.contains("don moi") && (lower.contains("chap nhan") || lower.contains("tu choi"))) return true
-        if (lower.contains("chap nhan") && lower.contains("tu choi")) return true
+        if (lower.contains("chap nhan")) return true
         if (lower.contains("don gan") || lower.contains("don chi dinh") || lower.contains("chi dinh don") || lower.contains("he thong gan")) return true
+        if (lower.contains("nhom") && lower.contains("don") && lower.contains("nhan duoc")) return true
         return false
     }
 
@@ -1989,13 +1991,13 @@ class AutoPickService : AccessibilityService() {
         }
         if (rootNode != null) {
             val chapNhanList = try { rootNode.findAccessibilityNodeInfosByText("Chấp nhận") } catch (_: Exception) { null }
-            val tuChoiList = try { rootNode.findAccessibilityNodeInfosByText("Từ chối") } catch (_: Exception) { null }
+            val sauKhiList = try { rootNode.findAccessibilityNodeInfosByText("hoàn thành") } catch (_: Exception) { null }
             val hasChapNhan = !chapNhanList.isNullOrEmpty()
-            val hasTuChoi = !tuChoiList.isNullOrEmpty()
+            val hasSauKhi = !sauKhiList.isNullOrEmpty()
             chapNhanList?.forEach { try { it.recycle() } catch (_: Exception) {} }
-            tuChoiList?.forEach { try { it.recycle() } catch (_: Exception) {} }
-            if (hasChapNhan && hasTuChoi) {
-                handleAssignedOrderDetected("assigned_modal_buttons (Chấp nhận + Từ chối)")
+            sauKhiList?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            if (hasChapNhan || hasSauKhi) {
+                handleAssignedOrderDetected("assigned_modal (Chấp nhận=$hasChapNhan, hoàn thành=$hasSauKhi)")
                 return
             }
         }
@@ -2079,9 +2081,35 @@ class AutoPickService : AccessibilityService() {
             return
         }
 
+        // 0.C1 PHÁT HIỆN POPUP LỖI HỆ THỐNG / MẠNG: "Rất tiếc, đã có lỗi xảy ra. Bạn vui lòng thử lại sau nhé!" -> Bấm Đóng & Tự động Load lại!
+        var isSystemErrorPopup = lowerRawText.contains("da co loi xay ra") || 
+            lowerRawText.contains("vui long thu lai sau") ||
+            (lowerRawText.contains("loi") && lowerRawText.contains("thu lai sau"))
+        if (!isSystemErrorPopup && rootNode != null) {
+            val errNodes1 = try { rootNode.findAccessibilityNodeInfosByText("lỗi xảy ra") } catch (_: Exception) { null }
+            val errNodes2 = try { rootNode.findAccessibilityNodeInfosByText("thử lại sau") } catch (_: Exception) { null }
+            if (!errNodes1.isNullOrEmpty() || !errNodes2.isNullOrEmpty()) {
+                isSystemErrorPopup = true
+            }
+            errNodes1?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            errNodes2?.forEach { try { it.recycle() } catch (_: Exception) {} }
+        }
+        if (isSystemErrorPopup) {
+            Log.i("HK_BENCHMARK", "SYSTEM_ERROR_POPUP_DETECTED: 'Đã có lỗi xảy ra' -> Bấm Đóng và Tự động Load lại!")
+            isWaitingOrderResult = false
+            awaitingPopupConfirmation = false
+            lastAcceptedTime = 0L
+            dismissMissedOrderDialog(rootNode)
+            pausePollingUntil = System.currentTimeMillis() + 400L
+            handler.postDelayed({
+                tapRefreshTarget(force = false)
+            }, 300L)
+            return
+        }
+
         // 0.C PHÁT HIỆN POPUP HỤT ĐƠN / TÀI XẾ KHÁC ĐÃ NHẬN / LỖI NHẬN ĐƠN (CHỈ KHI ĐANG CHỜ KẾT QUẢ ĐƠN)
         val isAwaitingOrder = isWaitingOrderResult || awaitingPopupConfirmation || bestOrderAttemptCount > 0
-        val isMissedOrderPopup = isAwaitingOrder && (
+        var isMissedOrderPopup = isAwaitingOrder && (
             lowerRawText.contains("tai xe khac") || 
             lowerRawText.contains("khong con ton tai") ||
             lowerRawText.contains("da co tai xe") ||
@@ -2093,6 +2121,13 @@ class AutoPickService : AccessibilityService() {
             lowerRawText.contains("gioi han nhan don") ||
             lowerRawText.contains("da hieu")
         )
+        if (!isMissedOrderPopup && isAwaitingOrder && rootNode != null) {
+            val missedNodes = try { rootNode.findAccessibilityNodeInfosByText("Đã hiểu") } catch (_: Exception) { null }
+            if (!missedNodes.isNullOrEmpty()) {
+                isMissedOrderPopup = true
+            }
+            missedNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+        }
 
         if (isMissedOrderPopup) {
             isWaitingOrderResult = false
@@ -2202,12 +2237,8 @@ class AutoPickService : AccessibilityService() {
         }
 
         // 0. PHÁT HIỆN "ĐƠN GÁN" (HỆ THỐNG ÉP ĐƠN)
-        val isAssigned = lowerRawText.contains("sau khi hoan thanh") || 
-                         (lowerRawText.contains("don moi") && lowerRawText.contains("chap nhan"))
-        if (isAssigned) {
-            Log.i("HK_BENCHMARK", "ASSIGNED_ORDER_DETECTED -> Tạm dừng tool, tài xế tự quyết định")
-            stopAutoRunState("assigned_order")
-            playAlertSound()
+        if (isAssignedOrderText(lowerRawText)) {
+            handleAssignedOrderDetected("analyzeAndAct fallback lowerRawText")
             return
         }
 
@@ -2348,7 +2379,8 @@ class AutoPickService : AccessibilityService() {
                 // CHỈ bấm vào tọa độ hồng tâm nút LOAD (targetRefresh).
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_B: Khong co don free-pick -> Chi bam nut Load Target (bo qua link bi quyet)")
                 resetBestOrderState()
-                tapRefreshTarget(force = true)
+                tapRefreshTarget(force = false)
+                pausePollingUntil = System.currentTimeMillis() + 400L
                 return
             } else if (isStateA) {
                 // Trạng thái A: Đã vuốt hết các đơn trong danh sách
@@ -2359,6 +2391,7 @@ class AutoPickService : AccessibilityService() {
                     resetBestOrderState()
                     clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
+                pausePollingUntil = System.currentTimeMillis() + 400L
                 return
             }
         }
@@ -3013,6 +3046,8 @@ class AutoPickService : AccessibilityService() {
 
             if (!selectBestOrderEnabled) {
                 if (isNgon) {
+                    lastRejectedFingerprint = ""
+                    rejectedRepeatCount = 0
                     isWaitingToSwipe = false
                     performAcceptOrder(rootNode, targetRect, savedAcceptNode, decisionKey, finalCardText, allText, finalPrice, finalDistance, swipeFingerprint)
                 } else {
@@ -3022,9 +3057,29 @@ class AutoPickService : AccessibilityService() {
                     if (holdForPinnedAddress) {
                         pausePollingUntil = System.currentTimeMillis() + 750L
                     } else {
+                        if (decisionKey == lastRejectedFingerprint) {
+                            rejectedRepeatCount++
+                        } else {
+                            lastRejectedFingerprint = decisionKey
+                            rejectedRepeatCount = 1
+                        }
+
+                        // Nếu thẻ không đạt yêu cầu này đã vuốt >= 2 lần mà vẫn còn trên màn hình
+                        // -> Đã đến cuối danh sách đơn (hết đơn để vuốt)!
+                        // -> TỰ ĐỘNG BẤM LOAD (TẢI LẠI TRANG) NGAY LẬP TỨC ĐỂ LẤY MẺ ĐƠN MỚI!
+                        if (rejectedRepeatCount >= 2) {
+                            Log.i("HK_BENCHMARK", "END_OF_DECK_REACHED in normal mode (card repeated $rejectedRepeatCount times). Auto tapping LOAD!")
+                            lastRejectedFingerprint = ""
+                            rejectedRepeatCount = 0
+                            resetBestOrderState()
+                            clickTaiLaiTrangOrTapRefresh(rootNode)
+                            pausePollingUntil = System.currentTimeMillis() + 400L
+                            return
+                        }
+
                         // Đơn dở → Lướt ngay bằng cử chỉ Target 1 -> Target 2 (ngón tay thật như bản 03-10)
                         val totalTurnMs = if (currentScanStartTime > 0L) android.os.SystemClock.uptimeMillis() - currentScanStartTime else 0L
-                        Log.i("HK_BENCHMARK", "DECISION_SKIP_SWIPE totalTurnMs=${totalTurnMs}ms price=$finalPrice dist=$finalDistance")
+                        Log.i("HK_BENCHMARK", "DECISION_SKIP_SWIPE totalTurnMs=${totalTurnMs}ms price=$finalPrice dist=$finalDistance repeat=$rejectedRepeatCount")
 
                         val swipeDuration = swipeByTargets()
                         val retryDelayMs = if (swipeDuration > 0L) {
@@ -3215,7 +3270,8 @@ class AutoPickService : AccessibilityService() {
                 // TUYỆT ĐỐI KHÔNG CLICK VÀO LINK "Xem bí quyết...", CHỈ BẤM HỒNG TÂM NÚT LOAD
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_B_FULLTEXT: Khong co don free-pick -> Chi bam nut Load Target")
                 resetBestOrderState()
-                tapRefreshTarget(force = true)
+                tapRefreshTarget(force = false)
+                pausePollingUntil = System.currentTimeMillis() + 400L
             } else if (isStateA) {
                 // Trạng thái A: Đã vuốt hết các đơn trong danh sách
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_A_FULLTEXT: Khong con don hang nao")
@@ -3225,17 +3281,19 @@ class AutoPickService : AccessibilityService() {
                     resetBestOrderState()
                     clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
+                pausePollingUntil = System.currentTimeMillis() + 400L
             } else if (selectBestOrderEnabled && bestOrderState == BestOrderState.REVERSING) {
                 handleEndOfDeckOrEmptyScreen(rootNode)
             } else {
-                // Màn hình trống hoàn toàn không có đơn (idle) -> Tự động bấm Load định kỳ mỗi 1.5s - 2s
+                // Màn hình trống hoàn toàn không có đơn (idle) -> Tự động bấm Load định kỳ mỗi 500ms
                 val now = System.currentTimeMillis()
                 if (emptyScreenStartTime == 0L) {
                     emptyScreenStartTime = now
-                } else if (now - emptyScreenStartTime >= 1500L && now - lastRefreshTime >= 1500L) {
-                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE (1.5s khong co don) -> Tu dong bam nut Load")
+                } else if (now - emptyScreenStartTime >= 500L && now - lastRefreshTime >= 500L) {
+                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE (500ms khong co don) -> Tu dong bam nut Load")
                     emptyScreenStartTime = now
-                    tapRefreshTarget(force = true)
+                    tapRefreshTarget(force = false)
+                    pausePollingUntil = now + 400L
                 }
             }
         }
@@ -3369,12 +3427,14 @@ class AutoPickService : AccessibilityService() {
             lastSwipedCardFingerprint = ""
             lastSwipedCardExpiresAt = 0L
             emptyScreenStartTime = 0L
-            pausePollingUntil = 0L
+            lastRejectedFingerprint = ""
+            rejectedRepeatCount = 0
+            pausePollingUntil = System.currentTimeMillis() + 350L
             resetFreePickConfirmation()
             lastAcceptedTime = 0L
-        } else {
-            tapRefreshTarget(force = true)
         }
+        // LUÔN LUÔN BẤM HỒNG TÂM LOAD (targetRefresh - nút tròn 2 mũi tên xoay mép trái)
+        tapRefreshTarget(force = false)
     }
 
     private fun tapRefreshTarget(force: Boolean = false) {
@@ -3402,7 +3462,7 @@ class AutoPickService : AccessibilityService() {
 
         showTouchIndicator(x, y)
         val path = Path().apply { moveTo(x, y) }
-        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 20)).build()
+        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 40)).build()
 
         // ===== SAU KHI BẤM LOAD: NẾU CÓ ĐƠN LÀ LỰA LIỀN =====
         // 1. Kích hoạt chế độ tác chiến 1ms siêu tốc trong 6 giây tiếp theo
@@ -3411,7 +3471,9 @@ class AutoPickService : AccessibilityService() {
         lastSwipedCardFingerprint = ""
         lastSwipedCardExpiresAt = 0L
         emptyScreenStartTime = 0L
-        pausePollingUntil = 0L
+        lastRejectedFingerprint = ""
+        rejectedRepeatCount = 0
+        pausePollingUntil = now + 350L
 
         // 3. Quét ngay khi cử chỉ bấm nút Load vừa hoàn tất (20ms)
         dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {
@@ -4118,7 +4180,7 @@ class AutoPickService : AccessibilityService() {
         }
 
         // 2. Tìm theo text: Ưu tiên tuyệt đối các nút nằm trong vùng Dialog (ở giữa màn hình, từ 35% đến 78% chiều cao)
-        val acceptLabels = listOf("Nhận đơn", "NHẬN ĐƠN", "Xác nhận", "XÁC NHẬN", "Đồng ý", "ĐỒNG Ý", "Lấy đơn", "LẤY ĐƠN", "Nhận", "Chấp nhận")
+        val acceptLabels = listOf("Nhận đơn", "NHẬN ĐƠN", "Xác nhận", "XÁC NHẬN", "Đồng ý", "ĐỒNG Ý", "Lấy đơn", "LẤY ĐƠN", "Nhận")
         val candidateButtons = mutableListOf<Pair<AccessibilityNodeInfo, android.graphics.Rect>>()
 
         for (root in candidateRoots) {
@@ -4210,7 +4272,7 @@ class AutoPickService : AccessibilityService() {
         val foundNodes = mutableListOf<AccessibilityNodeInfo>()
 
         try {
-            if (activeRoot.packageName?.toString() != targetDriverPackage || !isDriverAppForeground()) return false
+            if (!isDriverAppPackage(activeRoot.packageName?.toString()) || !isDriverAppForeground()) return false
 
             for (btnText in buttonTexts) {
                 val nodes = activeRoot.findAccessibilityNodeInfosByText(btnText)
