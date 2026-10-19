@@ -2186,8 +2186,8 @@ class AutoPickService : AccessibilityService() {
             if (selectBestOrderEnabled && scannedDeck.isNotEmpty()) {
                 // Đánh dấu đơn vừa thử nhận bị hụt
                 val failedCard = scannedDeck.firstOrNull { 
-                    Math.abs(it.price - bestOrderTargetPrice) < 0.15 && 
-                    Math.abs(it.distance - bestOrderTargetDistance) < 0.15 &&
+                    kotlin.math.abs(it.price - bestOrderTargetPrice) <= 0.05 && 
+                    kotlin.math.abs(it.distance - bestOrderTargetDistance) <= 0.15 &&
                     (it.orderCount == bestOrderTargetCount || bestOrderTargetCount == 0)
                 } ?: scannedDeck.firstOrNull { it.fingerprint == bestOrderTargetFingerprint }
                 failedCard?.isFailed = true
@@ -3153,13 +3153,11 @@ class AutoPickService : AccessibilityService() {
                     val d = finalDistance ?: 0.0
                     val cardPoints = extractShopeePoints(finalCardText)
 
-                    val priceMatch = Math.abs(p - bestOrderTargetPrice) < 0.20
-                    val distMatch = Math.abs(d - bestOrderTargetDistance) < 0.20
+                    val priceMatch = kotlin.math.abs(p - bestOrderTargetPrice) <= 0.05
+                    val distMatch = kotlin.math.abs(d - bestOrderTargetDistance) <= 0.15
                     val countMatch = (detectedOrderCount == bestOrderTargetCount || bestOrderTargetCount == 0 || detectedOrderCount == 0)
-                    val pointsMatch = (bestOrderTargetPoints == 0 || cardPoints == bestOrderTargetPoints || cardPoints == 0)
-                    val fingerprintMatch = (currentFingerprint == bestOrderTargetFingerprint)
 
-                    val isTargetMatch = (priceMatch && distMatch && countMatch) || fingerprintMatch
+                    val isTargetMatch = priceMatch && distMatch && countMatch
 
                     if (isTargetMatch) {
                         Log.i("HK_BENCHMARK", "BEST_ORDER_TARGET_REACHED price=$p dist=$d count=$detectedOrderCount pts=$cardPoints in $bestOrderReverseAttempts reverse swipes! ACCEPTING NOW!")
@@ -3245,13 +3243,11 @@ class AutoPickService : AccessibilityService() {
                     val pNow = finalPrice ?: 0.0
                     val dNow = finalDistance ?: 0.0
                     val ptsNow = extractShopeePoints(finalCardText)
-                    val priceMatch = Math.abs(pNow - bestOrder.price) < 0.20
-                    val distMatch = Math.abs(dNow - bestOrder.distance) < 0.20
+                    val priceMatch = kotlin.math.abs(pNow - bestOrder.price) <= 0.05
+                    val distMatch = kotlin.math.abs(dNow - bestOrder.distance) <= 0.15
                     val countMatch = (detectedOrderCount == bestOrder.orderCount || bestOrder.orderCount == 0 || detectedOrderCount == 0)
-                    val pointsMatch = (bestOrder.points == 0 || ptsNow == bestOrder.points || ptsNow == 0)
-                    val fingerprintMatch = (currentFingerprint == bestOrder.fingerprint)
 
-                    if ((priceMatch && distMatch && countMatch) || fingerprintMatch) {
+                    if (priceMatch && distMatch && countMatch) {
                         Log.i("HK_BENCHMARK", "BEST_ORDER_WINNER_ALREADY_ON_SCREEN! ACCEPTING IMMEDIATELY!")
                         // Không clear scannedDeck lúc này để dự phòng tìm đơn ngon thứ 2 nếu hụt đơn
                         bestOrderState = BestOrderState.IDLE
@@ -3353,9 +3349,9 @@ class AutoPickService : AccessibilityService() {
         return eligible.sortedWith(
             compareByDescending<ScannedOrder> { it.isTienChuyen }
                 .thenByDescending { it.orderCount }
-                .thenByDescending { it.points }
-                .thenByDescending { if (it.distance > 0.0) it.price / it.distance else 0.0 }
                 .thenByDescending { it.price }
+                .thenByDescending { if (it.distance > 0.0) it.price / it.distance else 0.0 }
+                .thenByDescending { it.points }
         )
     }
 
@@ -3387,9 +3383,9 @@ class AutoPickService : AccessibilityService() {
                 // SO SÁNH RIÊNG THEO TỪNG CẤP ĐƠN (1-1, 2-2, 3-3, 4-4, 5-5...):
                 // 1. Tiện chuyến luôn ưu tiên số 1 (nếu có)
                 // 2. Ưu tiên chùm nhiều đơn (8 > 7 > 6 > 5 > 4 > 3 > 2 > 1)
-                // 3. Trong cùng nhóm chùm đơn (1-1, 2-2, 3-3, 4-4, 5-5): ĐIỂM THƯỞNG CAO HƠN THÌ NHẬN (it.points)
+                // 3. ĐÚNG GIÁ SET VÀ GIÁ CAO HƠN THÌ NHẬN (it.price giảm dần)
                 // 4. Tỉ lệ Cước/Km cao hơn thắng (price / distance)
-                // 5. Nếu bằng: ĐÚNG GIÁ SET VÀ GIÁ CAO HƠN THÌ NHẬN (it.price)
+                // 5. Nếu bằng: Điểm thưởng Shopee (it.points)
                 val bestOrder = eligibleOrders.first()
                 val ratio = if (bestOrder.distance > 0.0) bestOrder.price / bestOrder.distance else 0.0
                 Log.i("HK_BENCHMARK", "BEST_ORDER_CHOSEN winner=${bestOrder.fingerprint} count=${bestOrder.orderCount} pts=${bestOrder.points} price=${bestOrder.price} dist=${bestOrder.distance} ratio=${String.format(java.util.Locale.US, "%.2f", ratio)} isTc=${bestOrder.isTienChuyen} totalScanned=${scannedDeck.size}")
