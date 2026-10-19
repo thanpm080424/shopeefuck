@@ -88,6 +88,10 @@ class MainActivity : FlutterActivity() {
 
                     
                     AutoPickService.selectBestOrderEnabled = call.argument<Boolean>("selectBestOrder") ?: false
+                    AutoPickService.bestOrderPrioritizePrice = call.argument<Boolean>("bestOrderPrioritizePrice") ?: true
+                    AutoPickService.bestOrderPrioritizeRatio = call.argument<Boolean>("bestOrderPrioritizeRatio") ?: true
+                    AutoPickService.bestOrderPrioritizeCount = call.argument<Boolean>("bestOrderPrioritizeCount") ?: true
+                    AutoPickService.bestOrderPrioritizePoints = call.argument<Boolean>("bestOrderPrioritizePoints") ?: false
                     AutoPickService.htRejectCodGlobal = call.argument<Boolean>("htRejectCodGlobal") ?: true
                     
                     val htCardsJson = call.argument<String>("htCardsJson") ?: "[]"
@@ -105,6 +109,10 @@ class MainActivity : FlutterActivity() {
                         .putString("flutter.pick_mode", pickMode)
                         .putLong("flutter.swipeDurationMs", swipeDurationMs)
                         .putBoolean("flutter.selectBestOrder", AutoPickService.selectBestOrderEnabled)
+                        .putBoolean("flutter.bestOrderPrioritizePrice", AutoPickService.bestOrderPrioritizePrice)
+                        .putBoolean("flutter.bestOrderPrioritizeRatio", AutoPickService.bestOrderPrioritizeRatio)
+                        .putBoolean("flutter.bestOrderPrioritizeCount", AutoPickService.bestOrderPrioritizeCount)
+                        .putBoolean("flutter.bestOrderPrioritizePoints", AutoPickService.bestOrderPrioritizePoints)
                         .putBoolean("flutter.tcEnabled", AutoPickService.tcEnabled)
                         .putString("flutter.tcDistrict", AutoPickService.tcDistrict)
                         .putString("flutter.tcKeywords", AutoPickService.tcKeywords)

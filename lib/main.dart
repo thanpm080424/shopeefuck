@@ -78,6 +78,10 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
   List<bool> _htUseDistricts = List.filled(6, false);
   bool _htRejectCod = true; // Mặc định từ chối đơn Ký quỹ / COD cho tất cả thẻ và tiện chuyến
   bool _selectBestOrder = false; // Quét tất cả thẻ rồi quay lại chọn đơn ngon nhất
+  bool _bestOrderPrioritizePrice = true;
+  bool _bestOrderPrioritizeRatio = true;
+  bool _bestOrderPrioritizeCount = true;
+  bool _bestOrderPrioritizePoints = false;
   
   // --- TIỆN CHUYẾN ---
   bool _tcEnabled = false;
@@ -419,6 +423,10 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
       }
       _htRejectCod = prefs.getBool('ht_rejectCod_v4') ?? true;
       _selectBestOrder = prefs.getBool('selectBestOrder') ?? false;
+      _bestOrderPrioritizePrice = prefs.getBool('bestOrderPrioritizePrice') ?? true;
+      _bestOrderPrioritizeRatio = prefs.getBool('bestOrderPrioritizeRatio') ?? true;
+      _bestOrderPrioritizeCount = prefs.getBool('bestOrderPrioritizeCount') ?? true;
+      _bestOrderPrioritizePoints = prefs.getBool('bestOrderPrioritizePoints') ?? false;
 
       _tcEnabled = prefs.getBool('tcEnabled') ?? false;
       _tcDistrict = prefs.getString('tcDistrict') ?? 'Quận 1';
@@ -488,6 +496,10 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
     }
     await prefs.setBool('ht_rejectCod_v4', _htRejectCod);
     await prefs.setBool('selectBestOrder', _selectBestOrder);
+    await prefs.setBool('bestOrderPrioritizePrice', _bestOrderPrioritizePrice);
+    await prefs.setBool('bestOrderPrioritizeRatio', _bestOrderPrioritizeRatio);
+    await prefs.setBool('bestOrderPrioritizeCount', _bestOrderPrioritizeCount);
+    await prefs.setBool('bestOrderPrioritizePoints', _bestOrderPrioritizePoints);
     
     await prefs.setBool('tcEnabled', _tcEnabled);
     await prefs.setString('tcDistrict', _tcDistrict);
@@ -543,6 +555,10 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
         'htCardsJson': jsonEncode(htCards),
         'htRejectCodGlobal': _htRejectCod,
         'selectBestOrder': _selectBestOrder,
+        'bestOrderPrioritizePrice': _bestOrderPrioritizePrice,
+        'bestOrderPrioritizeRatio': _bestOrderPrioritizeRatio,
+        'bestOrderPrioritizeCount': _bestOrderPrioritizeCount,
+        'bestOrderPrioritizePoints': _bestOrderPrioritizePoints,
         
       'tcEnabled': _tcEnabled,
       'tcDistrict': _tcDistrict,
@@ -1229,8 +1245,70 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
               ),
               const SizedBox(height: 4),
               const Text(
-                'Khi BẬT: Ứng dụng lướt xem hết các đơn trên màn hình để so sánh, sau đó lướt ngược lại nhận đơn có tỷ lệ Cước/Km cao nhất (Ưu tiên Tiện chuyến).\nKhi TẮT: Tự động nhận ngay đơn hợp lệ đầu tiên xuất hiện.',
+                'Khi BẬT: Ứng dụng lướt xem hết các đơn trên màn hình để so sánh, sau đó lướt ngược lại nhận đơn tốt nhất theo các tiêu chí bên dưới (Ưu tiên Tiện chuyến).\nKhi TẮT: Tự động nhận ngay đơn hợp lệ đầu tiên xuất hiện.',
                 style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
+              ),
+              const SizedBox(height: 10),
+              const Divider(color: Colors.white24, height: 1),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'TIÊU CHÍ ƯU TIÊN SO SÁNH (BẬT / TẮT TÙY Ý):',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.amberAccent,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  Text(
+                    _selectBestOrder ? '• Đang kích hoạt' : '• Chờ bật công tắc chính',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: _selectBestOrder ? Colors.greenAccent : Colors.white38,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              _buildPrioritySwitch(
+                title: '1. Ưu tiên Chùm nhiều đơn',
+                subtitle: 'Chùm nhiều đơn hơn (6+ > 5 > 4 > 3 > 2 > 1) được ưu tiên',
+                value: _bestOrderPrioritizeCount,
+                onChanged: (val) {
+                  setState(() => _bestOrderPrioritizeCount = val);
+                  _updateNativeSettings();
+                },
+              ),
+              _buildPrioritySwitch(
+                title: '2. Ưu tiên Giá tiền cao nhất',
+                subtitle: 'Đơn nhiều tiền hơn (ví dụ 50.9k > 46.6k) được ưu tiên',
+                value: _bestOrderPrioritizePrice,
+                onChanged: (val) {
+                  setState(() => _bestOrderPrioritizePrice = val);
+                  _updateNativeSettings();
+                },
+              ),
+              _buildPrioritySwitch(
+                title: '3. Ưu tiên Tỉ lệ Cước / Km',
+                subtitle: 'Đơn có đơn giá trên mỗi km cao hơn được ưu tiên',
+                value: _bestOrderPrioritizeRatio,
+                onChanged: (val) {
+                  setState(() => _bestOrderPrioritizeRatio = val);
+                  _updateNativeSettings();
+                },
+              ),
+              _buildPrioritySwitch(
+                title: '4. Ưu tiên Điểm thưởng Shopee',
+                subtitle: 'Cộng nhiều điểm hơn (10đ > 8đ) được ưu tiên (nếu bật)',
+                value: _bestOrderPrioritizePoints,
+                onChanged: (val) {
+                  setState(() => _bestOrderPrioritizePoints = val);
+                  _updateNativeSettings();
+                },
               ),
             ],
           ),
@@ -1238,6 +1316,50 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
         
         ...List.generate(6, (i) => _buildOrderCard(i)),
       ],
+    );
+  }
+
+  Widget _buildPrioritySwitch({
+    required String title,
+    required String subtitle,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    color: Colors.white54,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: value,
+            activeColor: Colors.amberAccent,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
     );
   }
 

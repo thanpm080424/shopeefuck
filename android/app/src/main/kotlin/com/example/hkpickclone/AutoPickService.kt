@@ -77,6 +77,10 @@ class AutoPickService : AccessibilityService() {
         var tcMinPrice = 15.0
         var htRejectCodGlobal = true
         var selectBestOrderEnabled = false
+        var bestOrderPrioritizePrice = true
+        var bestOrderPrioritizeRatio = true
+        var bestOrderPrioritizeCount = true
+        var bestOrderPrioritizePoints = false
 
         var maxFoodDistance = 1.0
 
@@ -1394,6 +1398,10 @@ class AutoPickService : AccessibilityService() {
             }.coerceIn(1L, 500L)
             maxRandomDelayMs = savedDouble("randomDelayMs", "randomDelayMs", 0.0)
             selectBestOrderEnabled = savedBoolean("selectBestOrder", "selectBestOrder", false)
+            bestOrderPrioritizePrice = savedBoolean("bestOrderPrioritizePrice", "bestOrderPrioritizePrice", true)
+            bestOrderPrioritizeRatio = savedBoolean("bestOrderPrioritizeRatio", "bestOrderPrioritizeRatio", true)
+            bestOrderPrioritizeCount = savedBoolean("bestOrderPrioritizeCount", "bestOrderPrioritizeCount", true)
+            bestOrderPrioritizePoints = savedBoolean("bestOrderPrioritizePoints", "bestOrderPrioritizePoints", false)
 
             tcEnabled = savedBoolean("tcEnabled", "tcEnabled", false)
             tcDistrict = savedString("tcDistrict", "tcDistrict", "")
@@ -3348,10 +3356,10 @@ class AutoPickService : AccessibilityService() {
         val eligible = scannedDeck.filter { it.isEligible && !it.isFailed }
         return eligible.sortedWith(
             compareByDescending<ScannedOrder> { it.isTienChuyen }
-                .thenByDescending { it.orderCount }
-                .thenByDescending { it.price }
-                .thenByDescending { if (it.distance > 0.0) it.price / it.distance else 0.0 }
-                .thenByDescending { it.points }
+                .thenByDescending { if (bestOrderPrioritizeCount) it.orderCount else 0 }
+                .thenByDescending { if (bestOrderPrioritizePrice) it.price else 0.0 }
+                .thenByDescending { if (bestOrderPrioritizeRatio && it.distance > 0.0) it.price / it.distance else 0.0 }
+                .thenByDescending { if (bestOrderPrioritizePoints) it.points else 0 }
         )
     }
 
