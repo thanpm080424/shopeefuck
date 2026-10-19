@@ -918,6 +918,53 @@ class AutoPickService : AccessibilityService() {
         }
     }
 
+    private fun isAssignedOrderText(text: String): Boolean {
+        if (text.isBlank()) return false
+        val lower = removeAccents(text).lowercase()
+        if (lower.contains("sau khi hoan thanh")) return true
+        if (lower.contains("don moi") && (lower.contains("chap nhan") || lower.contains("tu choi"))) return true
+        if (lower.contains("chap nhan") && lower.contains("tu choi")) return true
+        if (lower.contains("don gan") || lower.contains("don chi dinh") || lower.contains("chi dinh don") || lower.contains("he thong gan")) return true
+        return false
+    }
+
+    private fun triggerAlarmAndVibrate() {
+        playAlertSound()
+        try {
+            val vibrator = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                vibratorManager?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 600, 200, 600, 200, 600), -1))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(longArrayOf(0, 600, 200, 600, 200, 600), -1)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun handleAssignedOrderDetected(sourceHint: String) {
+        Log.w("HK_BENCHMARK", "ASSIGNED_ORDER_DETECTED source=$sourceHint -> STOPPING TOOL!")
+        stopAutoRunState("assigned_order")
+        triggerAlarmAndVibrate()
+        handler.post {
+            android.widget.Toast.makeText(this, "⚠️ PHÁT HIỆN ĐƠN GÁN / ÉP ĐƠN! Tool đã dừng để bạn tự quyết định.", android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun isDriverAppPackage(pkg: String?): Boolean {
+        if (pkg.isNullOrBlank()) return true
+        val p = pkg.lowercase()
+        val target = targetDriverPackage?.lowercase()
+        return (target != null && p == target) ||
+                p.contains("shopee") || p.contains("foody") || p.contains("driver") || p.contains("now") ||
+                p.contains("gofers") || p.contains("delivery")
+    }
+
     private fun isRealAcceptButton(node: AccessibilityNodeInfo?): Boolean {
         if (node == null) return false
         val bounds = android.graphics.Rect()
@@ -1124,36 +1171,31 @@ class AutoPickService : AccessibilityService() {
     
 
     private fun getFullAccessibilityText(): String {
-
-        val targetPackage = targetDriverPackage ?: return ""
         val activeRoot = rootInActiveWindow ?: return ""
         return try {
-            if (activeRoot.packageName?.toString() == targetPackage) extractAllText(activeRoot) else ""
+            val pkg = activeRoot.packageName?.toString().orEmpty()
+            if (isDriverAppPackage(pkg)) extractAllText(activeRoot) else ""
         } catch (e: Exception) {
             Log.w(TAG, "ACCESSIBILITY_TEXT_READ_FAILED", e)
             ""
         } finally {
             activeRoot.recycle()
         }
-
     }
-
-    
 
     private fun doAccessibilityRead() {
         if (isScanningScreen) return
         isScanningScreen = true
         currentScanStartTime = android.os.SystemClock.uptimeMillis()
-        val targetPackage = targetDriverPackage ?: run {
-            isScanningScreen = false
-            return
-        }
         val activeRoot = rootInActiveWindow ?: run {
             isScanningScreen = false
             return
         }
         try {
-            if (activeRoot.packageName?.toString() != targetPackage) return
+            val rootPkg = activeRoot.packageName?.toString().orEmpty()
+            if (rootPkg.isNotEmpty() && !isDriverAppPackage(rootPkg) && rootPkg != "android") {
+                return
+            }
 
             // Chỉ duyệt cửa sổ phụ khi đang chờ popup xác nhận hoặc đang chờ kết quả nhận đơn
             if (awaitingPopupConfirmation || isWaitingOrderResult) {
@@ -1162,7 +1204,7 @@ class AutoPickService : AccessibilityService() {
                         if (window.isActive) continue
                         val root = window.root ?: continue
                         val pkg = root.packageName?.toString().orEmpty()
-                        if (pkg == targetPackage || pkg == "android" || pkg.contains("foody")) {
+                        if (isDriverAppPackage(pkg) || pkg == "android") {
                             val winText = extractAllText(root)
                             val lower = removeAccents(winText).lowercase()
                             if (lower.contains("nhan don") || lower.contains("xac nhan") || lower.contains("dong y") || lower.contains("thanh cong")) {
@@ -1187,10 +1229,6 @@ class AutoPickService : AccessibilityService() {
             isScanningScreen = false
         }
     }
-
-
-
-    
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -1222,7 +1260,7 @@ class AutoPickService : AccessibilityService() {
     private fun applyAccessibilityPackageScope(targetPackage: String?) {
         try {
             val info = serviceInfo ?: return
-            info.packageNames = targetPackage?.takeIf { it.isNotBlank() }?.let { arrayOf(it) }
+            info.packageNames = null // Để nhận event linh hoạt mọi app ShopeeFood/Foody/Driver
             info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED or
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED or
                 AccessibilityEvent.TYPE_VIEW_CLICKED or
@@ -1236,12 +1274,12 @@ class AutoPickService : AccessibilityService() {
     }
 
     private fun isDriverAppForeground(): Boolean {
-        val targetPackage = targetDriverPackage ?: return false
-        val root = rootInActiveWindow ?: return false
+        val root = rootInActiveWindow ?: return true
         return try {
-            root.packageName?.toString() == targetPackage
+            val pkg = root.packageName?.toString().orEmpty()
+            if (pkg.isBlank()) true else isDriverAppPackage(pkg)
         } catch (_: Exception) {
-            false
+            true
         } finally {
             try { root.recycle() } catch (_: Exception) {}
         }
@@ -1700,9 +1738,9 @@ class AutoPickService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
 
         if (event == null || !isRunning || currentState != AppState.RUNNING || !isLicenseValid()) return
-        val targetPackage = targetDriverPackage ?: return
-        if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED ||
-            event.packageName?.toString() != targetPackage || !isDriverAppForeground()) return
+        if (event.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) return
+        val eventPkg = event.packageName?.toString().orEmpty()
+        if (eventPkg.isNotEmpty() && !isDriverAppPackage(eventPkg) && eventPkg != "android") return
 
         // Read changes from the selected driver app promptly, with the same
         // speed-level throttle as the polling fallback.
@@ -1717,7 +1755,30 @@ class AutoPickService : AccessibilityService() {
         }
         val eventHint = removeAccents(eventText).lowercase()
 
-        // 0. KIỂM TRA ĐƠN ĐÃ LẤY THÀNH CÔNG TRỰC TIẾP TỪ EVENT (CHỐT ĐƠN VÀ DỪNG TOOL NGAY)
+        // 0.A KIỂM TRA ĐƠN GÁN / ĐƠN ÉP NHẬN TRỰC TIẾP TỪ EVENT -> DỪNG TOOL NGAY
+        if (isAssignedOrderText(eventHint)) {
+            handleAssignedOrderDetected("eventHint")
+            try { event.source?.recycle() } catch (_: Exception) {}
+            return
+        }
+
+        // 0.B KIỂM TRA MÀN HÌNH HẾT ĐƠN / TRỐNG ĐƠN TỪ EVENT -> BẤM TẢI LẠI TRANG / LOAD
+        val isEventEmptyState = eventHint.contains("khong con don hang nao") || 
+                               eventHint.contains("khong co don thuoc dang free-pick") ||
+                               eventHint.contains("hien dang khong co don") ||
+                               (eventHint.contains("tai lai trang") && !eventHint.contains("bi quyet"))
+        if (isEventEmptyState) {
+            val src = event.source
+            if (selectBestOrderEnabled && bestOrderState == BestOrderState.SCANNING && scannedDeck.isNotEmpty()) {
+                handleEndOfDeckOrEmptyScreen(src)
+            } else {
+                clickTaiLaiTrangOrTapRefresh(src)
+            }
+            try { src?.recycle() } catch (_: Exception) {}
+            return
+        }
+
+        // 0.C KIỂM TRA ĐƠN ĐÃ LẤY THÀNH CÔNG TRỰC TIẾP TỪ EVENT (CHỐT ĐƠN VÀ DỪNG TOOL NGAY)
         // Tuyệt đối không nhầm với thẻ đơn trên màn hình Free-pick (ví dụ quán "Y Khoa Thành Công", "Cơm tấm Thành Công")
         val successPhraseRegex = Regex("\\b(lay|nhan)\\s+don(\\s+free-pick)?\\s+thanh\\s+cong\\b")
         val isOrderCardText = eventHint.contains("lay hang:") || eventHint.contains("giao:") || 
@@ -1910,24 +1971,34 @@ class AutoPickService : AccessibilityService() {
 
     private fun analyzeAndAct(rootNode: AccessibilityNodeInfo?, allText: String = "", windowDebug: String = "", smartRect: android.graphics.Rect? = null, extraSystemText: String = "") {
 
-        val targetPackage = targetDriverPackage ?: return
-        if (rootNode != null && rootNode.packageName?.toString() != targetPackage && rootNode.packageName?.toString() != "android") return
+        val rootPkg = rootNode?.packageName?.toString().orEmpty()
+        if (rootPkg.isNotEmpty() && !isDriverAppPackage(rootPkg) && rootPkg != "android") return
 
         var targetRect = smartRect ?: android.graphics.Rect(0, 0, 0, 0)
 
-
-
-        // DEBUG LOGCAT
-
         if (rootNode == null && allText.isEmpty() && extraSystemText.isEmpty()) {
-
             return
-
         }
 
-
-
         val lowerRawText = removeAccents((allText + " " + extraSystemText).lowercase())
+
+        // 0. PHÁT HIỆN "ĐƠN GÁN" / "ĐƠN ÉP NHẬN" -> DỪNG TOOL NGAY LẬP TỨC!
+        if (isAssignedOrderText(lowerRawText)) {
+            handleAssignedOrderDetected("analyzeAndAct lowerRawText")
+            return
+        }
+        if (rootNode != null) {
+            val chapNhanList = try { rootNode.findAccessibilityNodeInfosByText("Chấp nhận") } catch (_: Exception) { null }
+            val tuChoiList = try { rootNode.findAccessibilityNodeInfosByText("Từ chối") } catch (_: Exception) { null }
+            val hasChapNhan = !chapNhanList.isNullOrEmpty()
+            val hasTuChoi = !tuChoiList.isNullOrEmpty()
+            chapNhanList?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            tuChoiList?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            if (hasChapNhan && hasTuChoi) {
+                handleAssignedOrderDetected("assigned_modal_buttons (Chấp nhận + Từ chối)")
+                return
+            }
+        }
 
         // Kiểm tra xem trên màn hình có thẻ đơn hoặc nút "Nhận đơn" không
         val hasNhanDonNodes = try { rootNode?.findAccessibilityNodeInfosByText("Nhận đơn") } catch (_: Exception) { null }
@@ -2253,7 +2324,7 @@ class AutoPickService : AccessibilityService() {
 
         // 2. NẾU KHÔNG CÓ MỎ NEO: KIỂM TRA THÔNG BÁO HẾT ĐƠN (PHÂN BIỆT RẠCH RÒI TRẠNG THÁI A & B)
         if (!foundOrder && rootNode != null) {
-            val emptyKw = listOf("Không còn", "free-pick", "Free-pick", "Tải lại", "tải lại")
+            val emptyKw = listOf("Không còn", "free-pick", "Free-pick", "Tải lại", "tải lại", "Không có", "không có", "Hiện đang", "hiện đang")
             var isStateA = false // "Không còn đơn hàng nào" / "Tải lại trang"
             var isStateB = false // "Hiện đang không có đơn thuộc dạng free-pick"
             for (kw in emptyKw) {
@@ -2261,9 +2332,9 @@ class AutoPickService : AccessibilityService() {
                 if (!nodes.isNullOrEmpty()) {
                     for (n in nodes) {
                         val txt = removeAccents((n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()).lowercase()
-                        if (txt.contains("khong co don thuoc dang free-pick")) {
+                        if (txt.contains("khong co don") || txt.contains("free-pick") || txt.contains("hien dang khong co don")) {
                             isStateB = true
-                        } else if (txt.contains("khong con don hang nao") || txt.contains("tai lai trang")) {
+                        } else if (txt.contains("khong con don") || txt.contains("tai lai trang") || (txt.contains("tai lai") && !txt.contains("bi quyet"))) {
                             isStateA = true
                         }
                         try { n.recycle() } catch (_: Exception) {}
@@ -2277,7 +2348,7 @@ class AutoPickService : AccessibilityService() {
                 // CHỈ bấm vào tọa độ hồng tâm nút LOAD (targetRefresh).
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_B: Khong co don free-pick -> Chi bam nut Load Target (bo qua link bi quyet)")
                 resetBestOrderState()
-                tapRefreshTarget()
+                tapRefreshTarget(force = true)
                 return
             } else if (isStateA) {
                 // Trạng thái A: Đã vuốt hết các đơn trong danh sách
@@ -2285,6 +2356,7 @@ class AutoPickService : AccessibilityService() {
                 if (selectBestOrderEnabled) {
                     handleEndOfDeckOrEmptyScreen(rootNode)
                 } else {
+                    resetBestOrderState()
                     clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
                 return
@@ -2979,9 +3051,9 @@ class AutoPickService : AccessibilityService() {
                     val d = finalDistance ?: 0.0
                     val cardPoints = extractShopeePoints(finalCardText)
 
-                    val priceMatch = Math.abs(p - bestOrderTargetPrice) < 0.15
-                    val distMatch = Math.abs(d - bestOrderTargetDistance) < 0.15
-                    val countMatch = (detectedOrderCount == bestOrderTargetCount || bestOrderTargetCount == 0)
+                    val priceMatch = Math.abs(p - bestOrderTargetPrice) < 0.20
+                    val distMatch = Math.abs(d - bestOrderTargetDistance) < 0.20
+                    val countMatch = (detectedOrderCount == bestOrderTargetCount || bestOrderTargetCount == 0 || detectedOrderCount == 0)
                     val pointsMatch = (bestOrderTargetPoints == 0 || cardPoints == bestOrderTargetPoints || cardPoints == 0)
                     val fingerprintMatch = (currentFingerprint == bestOrderTargetFingerprint)
 
@@ -2997,23 +3069,10 @@ class AutoPickService : AccessibilityService() {
                         return
                     } else {
                         bestOrderReverseAttempts++
-                        if (bestOrderReverseAttempts > 15) {
-                            Log.w("HK_BENCHMARK", "BEST_ORDER_REVERSE_TIMEOUT after 15 reverse swipes. Resetting.")
+                        if (bestOrderReverseAttempts > 10) {
+                            Log.w("HK_BENCHMARK", "BEST_ORDER_REVERSE_TIMEOUT after 10 reverse swipes. Đơn đã bị lấy hoặc văng trang. Reset và bấm Load!")
                             resetBestOrderState()
-
-                            if (isNgon) {
-                                performAcceptOrder(rootNode, targetRect, savedAcceptNode, decisionKey, finalCardText, allText, finalPrice, finalDistance, swipeFingerprint)
-                            } else {
-                                val swipeDuration = swipeByTargets()
-                                val retryDelayMs = if (swipeDuration > 0L) {
-                                    lastSwipedCardFingerprint = swipeFingerprint
-                                    lastSwipedCardExpiresAt = System.currentTimeMillis() + swipeDuration + 20L
-                                    swipeDuration + SWIPE_SETTLE_DELAY_MS
-                                } else {
-                                    accessibilityReadIntervalMs().coerceAtLeast(15L)
-                                }
-                                pausePollingUntil = System.currentTimeMillis() + retryDelayMs
-                            }
+                            clickTaiLaiTrangOrTapRefresh(rootNode)
                             return
                         } else {
                             val swipeDuration = dispatchReverseSwipe()
@@ -3071,18 +3130,9 @@ class AutoPickService : AccessibilityService() {
                     Log.i("HK_BENCHMARK", "BEST_ORDER_DECK_LIMIT: Reached deck limit or loop (retryCount=$scanSingleCardRetryCount, scanned=${scannedDeck.size}). Choosing best order now!")
                     val eligibleOrders = getSortedEligibleOrders()
                     if (eligibleOrders.isEmpty()) {
-                        Log.i("HK_BENCHMARK", "BEST_ORDER_COMPLETE: No eligible orders in deck (${scannedDeck.size} cards). Resetting.")
+                        Log.i("HK_BENCHMARK", "BEST_ORDER_COMPLETE: No eligible orders in deck (${scannedDeck.size} cards). Resetting and pressing Load!")
                         resetBestOrderState()
-
-                        val swipeDuration = swipeByTargets()
-                        val retryDelayMs = if (swipeDuration > 0L) {
-                            lastSwipedCardFingerprint = swipeFingerprint
-                            lastSwipedCardExpiresAt = System.currentTimeMillis() + swipeDuration + 20L
-                            swipeDuration + SWIPE_SETTLE_DELAY_MS
-                        } else {
-                            accessibilityReadIntervalMs().coerceAtLeast(15L)
-                        }
-                        pausePollingUntil = System.currentTimeMillis() + retryDelayMs
+                        clickTaiLaiTrangOrTapRefresh(rootNode)
                         return
                     }
 
@@ -3093,9 +3143,9 @@ class AutoPickService : AccessibilityService() {
                     val pNow = finalPrice ?: 0.0
                     val dNow = finalDistance ?: 0.0
                     val ptsNow = extractShopeePoints(finalCardText)
-                    val priceMatch = Math.abs(pNow - bestOrder.price) < 0.15
-                    val distMatch = Math.abs(dNow - bestOrder.distance) < 0.15
-                    val countMatch = (detectedOrderCount == bestOrder.orderCount || bestOrder.orderCount == 0)
+                    val priceMatch = Math.abs(pNow - bestOrder.price) < 0.20
+                    val distMatch = Math.abs(dNow - bestOrder.distance) < 0.20
+                    val countMatch = (detectedOrderCount == bestOrder.orderCount || bestOrder.orderCount == 0 || detectedOrderCount == 0)
                     val pointsMatch = (bestOrder.points == 0 || ptsNow == bestOrder.points || ptsNow == 0)
                     val fingerprintMatch = (currentFingerprint == bestOrder.fingerprint)
 
@@ -3157,15 +3207,15 @@ class AutoPickService : AccessibilityService() {
             isWaitingToSwipe = false
 
             val lowerFullText = removeAccents(currentAllText.lowercase())
-            val isStateB = lowerFullText.contains("khong co don thuoc dang free-pick")
-            val isStateA = lowerFullText.contains("khong con don hang nao") || lowerFullText.contains("tai lai trang")
+            val isStateB = lowerFullText.contains("free-pick") || lowerFullText.contains("khong co don") || lowerFullText.contains("hien dang khong co don")
+            val isStateA = lowerFullText.contains("khong con don") || lowerFullText.contains("tai lai trang") || (lowerFullText.contains("tai lai") && !lowerFullText.contains("bi quyet"))
 
             if (isStateB) {
                 // Trạng thái B: Khu vực hoàn toàn không có đơn free-pick
                 // TUYỆT ĐỐI KHÔNG CLICK VÀO LINK "Xem bí quyết...", CHỈ BẤM HỒNG TÂM NÚT LOAD
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_B_FULLTEXT: Khong co don free-pick -> Chi bam nut Load Target")
                 resetBestOrderState()
-                tapRefreshTarget()
+                tapRefreshTarget(force = true)
             } else if (isStateA) {
                 // Trạng thái A: Đã vuốt hết các đơn trong danh sách
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_A_FULLTEXT: Khong con don hang nao")
@@ -3177,6 +3227,16 @@ class AutoPickService : AccessibilityService() {
                 }
             } else if (selectBestOrderEnabled && bestOrderState == BestOrderState.REVERSING) {
                 handleEndOfDeckOrEmptyScreen(rootNode)
+            } else {
+                // Màn hình trống hoàn toàn không có đơn (idle) -> Tự động bấm Load định kỳ mỗi 1.5s - 2s
+                val now = System.currentTimeMillis()
+                if (emptyScreenStartTime == 0L) {
+                    emptyScreenStartTime = now
+                } else if (now - emptyScreenStartTime >= 1500L && now - lastRefreshTime >= 1500L) {
+                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE (1.5s khong co don) -> Tu dong bam nut Load")
+                    emptyScreenStartTime = now
+                    tapRefreshTarget(force = true)
+                }
             }
         }
     }
@@ -3247,8 +3307,8 @@ class AutoPickService : AccessibilityService() {
             }
         } else if (selectBestOrderEnabled && bestOrderState == BestOrderState.REVERSING) {
             bestOrderReverseAttempts++
-            if (bestOrderReverseAttempts > 15) {
-                Log.w("HK_BENCHMARK", "BEST_ORDER_REVERSE_TIMEOUT from empty screen after 15 reverse swipes. Resetting.")
+            if (bestOrderReverseAttempts > 10) {
+                Log.w("HK_BENCHMARK", "BEST_ORDER_REVERSE_TIMEOUT from empty screen after 10 reverse swipes. Resetting and refreshing.")
                 resetBestOrderState()
                 clickTaiLaiTrangOrTapRefresh(rootNode)
             } else {
@@ -3313,22 +3373,33 @@ class AutoPickService : AccessibilityService() {
             resetFreePickConfirmation()
             lastAcceptedTime = 0L
         } else {
-            tapRefreshTarget()
+            tapRefreshTarget(force = true)
         }
     }
 
     private fun tapRefreshTarget(force: Boolean = false) {
-        if (targetRefresh == null || !isDriverAppForeground()) return
+        if (!isDriverAppForeground()) return
 
         // Rate-limit Load while continuing to scan for newly loaded orders.
         val now = System.currentTimeMillis()
-        if (!force && now - lastRefreshTime < 500L) return
+        if (!force && now - lastRefreshTime < 400L) return
         lastRefreshTime = now
         resetFreePickConfirmation()
         lastAcceptedTime = 0L
 
-        val x = targetRefresh!!.getCenterX()
-        val y = targetRefresh!!.getCenterY()
+        val x: Float
+        val y: Float
+        val target = targetRefresh
+        if (target != null) {
+            x = target.getCenterX()
+            y = target.getCenterY()
+        } else {
+            val prefs = getSharedPreferences("AutoPickPrefs", Context.MODE_PRIVATE)
+            val metrics = resources.displayMetrics
+            x = prefs.getInt("x_ref_v2", (metrics.widthPixels * 0.15f).toInt()).toFloat()
+            y = prefs.getInt("y_ref_v2", (metrics.heightPixels * 0.45f).toInt()).toFloat()
+        }
+
         showTouchIndicator(x, y)
         val path = Path().apply { moveTo(x, y) }
         val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 20)).build()
@@ -3469,7 +3540,7 @@ class AutoPickService : AccessibilityService() {
         val distance = kotlin.math.hypot(deltaX.toDouble(), deltaY.toDouble()).toFloat()
 
         if (distance < 10f) {
-            deltaX = screenWidth * 0.75f
+            deltaX = if (startX < screenWidth / 2f) screenWidth * 0.75f else -screenWidth * 0.75f
             deltaY = 0f
         } else if (distance < 400f) {
             val scale = 500f / distance
