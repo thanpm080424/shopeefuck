@@ -269,7 +269,7 @@ class AutoPickService : AccessibilityService() {
 
         fun primeCombatMode() {
             instance?.let {
-                it.lastOrderDetectedTime = System.currentTimeMillis() + 6000L
+                it.lastOrderDetectedTime = System.currentTimeMillis()
                 it.lastSwipedCardFingerprint = ""
                 it.lastSwipedCardExpiresAt = 0L
                 it.pausePollingUntil = 0L
@@ -924,9 +924,11 @@ class AutoPickService : AccessibilityService() {
         if (text.isBlank()) return false
         val lower = removeAccents(text).lowercase()
         if (lower.contains("sau khi hoan thanh")) return true
-        if (lower.contains("chap nhan")) return true
-        if (lower.contains("don gan") || lower.contains("don chi dinh") || lower.contains("chi dinh don") || lower.contains("he thong gan")) return true
-        if (lower.contains("nhom") && lower.contains("don") && lower.contains("nhan duoc")) return true
+        if (lower.contains("chap nhan (")) return true // Bắt chuẩn nút "Chấp nhận (19s)"
+        if (Regex("""nhom\s+\d+\s+don""").containsMatchIn(lower) && lower.contains("chap nhan")) return true
+        if (lower.contains("don moi") && (lower.contains("chap nhan") || lower.contains("tu choi"))) return true
+        if (lower.contains("chap nhan") && lower.contains("tu choi")) return true
+        if (lower.contains("don gan") || lower.contains("don chi dinh") || lower.contains("he thong gan")) return true
         return false
     }
 
@@ -1651,7 +1653,7 @@ class AutoPickService : AccessibilityService() {
                     currentState = AppState.RUNNING
                     isAutoRunEnabled = true
                     val now = System.currentTimeMillis()
-                    lastOrderDetectedTime = now + 6000L
+                    lastOrderDetectedTime = now
                     lastSwipeTimeUptimeMs = 0L
                     pausePollingUntil = 0L
                     isWaitingOrderResult = false
@@ -1764,6 +1766,24 @@ class AutoPickService : AccessibilityService() {
             return
         }
 
+        // 0.A1 KIỂM TRA POPUP LỖI HỆ THỐNG / MẠNG TRỰC TIẾP TỪ EVENT ("Đã có lỗi xảy ra. Bạn vui lòng thử lại sau nhé!")
+        val isSystemErrorEvent = eventHint.contains("da co loi xay ra") || 
+                                 eventHint.contains("vui long thu lai sau") ||
+                                 (eventHint.contains("loi") && eventHint.contains("thu lai sau"))
+        if (isSystemErrorEvent) {
+            Log.i("HK_BENCHMARK", "SYSTEM_ERROR_EVENT_DETECTED text=$eventHint -> Bấm Đóng và Tự động Load lại!")
+            isWaitingOrderResult = false
+            awaitingPopupConfirmation = false
+            lastAcceptedTime = 0L
+            dismissMissedOrderDialog(event.source)
+            pausePollingUntil = System.currentTimeMillis() + 400L
+            handler.postDelayed({
+                tapRefreshTarget(force = true)
+            }, 300L)
+            try { event.source?.recycle() } catch (_: Exception) {}
+            return
+        }
+
         // 0.B KIỂM TRA MÀN HÌNH HẾT ĐƠN / TRỐNG ĐƠN TỪ EVENT -> BẤM TẢI LẠI TRANG / LOAD
         val isEventEmptyState = eventHint.contains("khong con don hang nao") || 
                                eventHint.contains("khong co don thuoc dang free-pick") ||
@@ -1813,7 +1833,7 @@ class AutoPickService : AccessibilityService() {
             eventHint.contains("xac nhan nhan don")
         )
         val now = System.currentTimeMillis()
-        lastOrderDetectedTime = now + 4000L
+        lastOrderDetectedTime = now
         if ((isConfirmationDialog || isWaitingOrderResult || now >= pausePollingUntil) &&
             now - lastAccessibilityReadAt >= 1L) {
             lastAccessibilityReadAt = now
@@ -1991,13 +2011,40 @@ class AutoPickService : AccessibilityService() {
         }
         if (rootNode != null) {
             val chapNhanList = try { rootNode.findAccessibilityNodeInfosByText("Chấp nhận") } catch (_: Exception) { null }
+            val tuChoiList = try { rootNode.findAccessibilityNodeInfosByText("Từ chối") } catch (_: Exception) { null }
             val sauKhiList = try { rootNode.findAccessibilityNodeInfosByText("hoàn thành") } catch (_: Exception) { null }
-            val hasChapNhan = !chapNhanList.isNullOrEmpty()
-            val hasSauKhi = !sauKhiList.isNullOrEmpty()
+            val donMoiList = try { rootNode.findAccessibilityNodeInfosByText("Đơn mới") } catch (_: Exception) { null }
+            val nhomDonList = try { rootNode.findAccessibilityNodeInfosByText("Nhóm") } catch (_: Exception) { null }
+            var isAssignedModal = !chapNhanList.isNullOrEmpty() && !tuChoiList.isNullOrEmpty()
+            if (!isAssignedModal && !sauKhiList.isNullOrEmpty()) {
+                isAssignedModal = true
+            }
+            if (!isAssignedModal && !chapNhanList.isNullOrEmpty()) {
+                for (n in chapNhanList) {
+                    val t = removeAccents((n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()).lowercase()
+                    // Nút "Chấp nhận (19s)" của đơn gán
+                    if (t.contains("chap nhan") || t.contains("s)")) {
+                        isAssignedModal = true
+                        break
+                    }
+                }
+            }
+            if (!isAssignedModal && !nhomDonList.isNullOrEmpty()) {
+                for (n in nhomDonList) {
+                    val t = removeAccents((n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()).lowercase()
+                    if (Regex("""nhom\s+\d+\s+don""").containsMatchIn(t)) {
+                        isAssignedModal = true
+                        break
+                    }
+                }
+            }
             chapNhanList?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            tuChoiList?.forEach { try { it.recycle() } catch (_: Exception) {} }
             sauKhiList?.forEach { try { it.recycle() } catch (_: Exception) {} }
-            if (hasChapNhan || hasSauKhi) {
-                handleAssignedOrderDetected("assigned_modal (Chấp nhận=$hasChapNhan, hoàn thành=$hasSauKhi)")
+            donMoiList?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            nhomDonList?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            if (isAssignedModal) {
+                handleAssignedOrderDetected("assigned_button_detected")
                 return
             }
         }
@@ -2102,7 +2149,7 @@ class AutoPickService : AccessibilityService() {
             dismissMissedOrderDialog(rootNode)
             pausePollingUntil = System.currentTimeMillis() + 400L
             handler.postDelayed({
-                tapRefreshTarget(force = false)
+                tapRefreshTarget(force = true)
             }, 300L)
             return
         }
@@ -2165,7 +2212,7 @@ class AutoPickService : AccessibilityService() {
                         pausePollingUntil = System.currentTimeMillis() + 80L
                         handler.postDelayed({
                             val swipeDuration = dispatchReverseSwipe()
-                            pausePollingUntil = System.currentTimeMillis() + swipeDuration + SWIPE_SETTLE_DELAY_MS
+                            pausePollingUntil = System.currentTimeMillis() + swipeDuration + 70L
                         }, 80L)
                         return
                     }
@@ -2306,7 +2353,7 @@ class AutoPickService : AccessibilityService() {
 
                                 if (isOrderCard) {
                                     foundOrder = true
-                                    lastOrderDetectedTime = System.currentTimeMillis() + 5000L
+                                    lastOrderDetectedTime = System.currentTimeMillis()
                                     finalPrice = p
                                     finalDistance = d
                                     finalCardText = cardText
@@ -2417,7 +2464,7 @@ class AutoPickService : AccessibilityService() {
                 }
                 if (isOrderFullscreen) {
                     foundOrder = true
-                    lastOrderDetectedTime = System.currentTimeMillis() + 5000L
+                    lastOrderDetectedTime = System.currentTimeMillis()
                     finalPrice = p
                     finalDistance = d
                     finalCardText = currentAllText
@@ -3134,7 +3181,7 @@ class AutoPickService : AccessibilityService() {
                             val retryDelayMs = if (swipeDuration > 0L) {
                                 lastSwipedCardFingerprint = swipeFingerprint
                                 lastSwipedCardExpiresAt = System.currentTimeMillis() + swipeDuration + 20L
-                                swipeDuration + SWIPE_SETTLE_DELAY_MS
+                                swipeDuration + 70L
                             } else {
                                 accessibilityReadIntervalMs().coerceAtLeast(15L)
                             }
@@ -3232,7 +3279,7 @@ class AutoPickService : AccessibilityService() {
                         val retryDelayMs = if (swipeDuration > 0L) {
                             lastSwipedCardFingerprint = swipeFingerprint
                             lastSwipedCardExpiresAt = System.currentTimeMillis() + swipeDuration + 20L
-                            swipeDuration + SWIPE_SETTLE_DELAY_MS
+                            swipeDuration + 70L
                         } else {
                             accessibilityReadIntervalMs().coerceAtLeast(15L)
                         }
@@ -3285,12 +3332,14 @@ class AutoPickService : AccessibilityService() {
             } else if (selectBestOrderEnabled && bestOrderState == BestOrderState.REVERSING) {
                 handleEndOfDeckOrEmptyScreen(rootNode)
             } else {
-                // Màn hình trống hoàn toàn không có đơn (idle) -> Tự động bấm Load định kỳ mỗi 500ms
+                // Màn hình trống hoàn toàn không có đơn (idle) -> Tự động bấm Load định kỳ mỗi 400ms
                 val now = System.currentTimeMillis()
                 if (emptyScreenStartTime == 0L) {
                     emptyScreenStartTime = now
-                } else if (now - emptyScreenStartTime >= 500L && now - lastRefreshTime >= 500L) {
-                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE (500ms khong co don) -> Tu dong bam nut Load")
+                    tapRefreshTarget(force = false)
+                    pausePollingUntil = now + 400L
+                } else if (now - lastRefreshTime >= 400L) {
+                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE (400ms khong co don) -> Tu dong bam nut Load")
                     emptyScreenStartTime = now
                     tapRefreshTarget(force = false)
                     pausePollingUntil = now + 400L
@@ -3357,7 +3406,7 @@ class AutoPickService : AccessibilityService() {
 
                 val swipeDuration = dispatchReverseSwipe()
                 val retryDelayMs = if (swipeDuration > 0L) {
-                    swipeDuration + SWIPE_SETTLE_DELAY_MS
+                    swipeDuration + 70L
                 } else {
                     accessibilityReadIntervalMs().coerceAtLeast(15L)
                 }
@@ -3372,7 +3421,7 @@ class AutoPickService : AccessibilityService() {
             } else {
                 val swipeDuration = dispatchReverseSwipe()
                 val retryDelayMs = if (swipeDuration > 0L) {
-                    swipeDuration + SWIPE_SETTLE_DELAY_MS
+                    swipeDuration + 70L
                 } else {
                     accessibilityReadIntervalMs().coerceAtLeast(15L)
                 }
@@ -3423,7 +3472,7 @@ class AutoPickService : AccessibilityService() {
             }
         }
         if (clicked) {
-            lastOrderDetectedTime = System.currentTimeMillis() + 6000L
+            lastOrderDetectedTime = System.currentTimeMillis()
             lastSwipedCardFingerprint = ""
             lastSwipedCardExpiresAt = 0L
             emptyScreenStartTime = 0L
@@ -3465,8 +3514,8 @@ class AutoPickService : AccessibilityService() {
         val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 40)).build()
 
         // ===== SAU KHI BẤM LOAD: NẾU CÓ ĐƠN LÀ LỰA LIỀN =====
-        // 1. Kích hoạt chế độ tác chiến 1ms siêu tốc trong 6 giây tiếp theo
-        lastOrderDetectedTime = now + 6000L
+        // 1. Cập nhật thời gian nhận diện
+        lastOrderDetectedTime = now
         // 2. Xóa sạch cờ ghi nhớ đơn cũ để lập tức chấp nhận và phân tích thẻ đơn mới vừa load
         lastSwipedCardFingerprint = ""
         lastSwipedCardExpiresAt = 0L
@@ -3498,7 +3547,7 @@ class AutoPickService : AccessibilityService() {
         val interval = if (lastSwipeTimeUptimeMs > 0L) now - lastSwipeTimeUptimeMs else 0L
         lastSwipeTimeUptimeMs = now
         swipeCount++
-        lastOrderDetectedTime = System.currentTimeMillis() + 5000L
+        lastOrderDetectedTime = System.currentTimeMillis()
 
         val startX: Float
         val startY: Float
@@ -3551,8 +3600,8 @@ class AutoPickService : AccessibilityService() {
             lineTo(adjustedEndX, adjustedEndY)
         }
 
-        // Tốc độ vuốt cử chỉ: Cho phép từ 1ms đến 500ms theo đúng cài đặt trên app!
-        val swipeDuration = swipeDurationMs.coerceIn(1L, 500L)
+        // Tốc độ vuốt cử chỉ: Tối thiểu 22ms để tránh Android 120Hz nhận nhầm là tap, tối đa 500ms
+        val swipeDuration = swipeDurationMs.coerceIn(22L, 500L)
         val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, swipeDuration)).build()
 
         val dispatched = dispatchGesture(gesture, null, null)
@@ -3570,7 +3619,7 @@ class AutoPickService : AccessibilityService() {
         val now = android.os.SystemClock.uptimeMillis()
         val interval = if (lastSwipeTimeUptimeMs > 0L) now - lastSwipeTimeUptimeMs else 0L
         lastSwipeTimeUptimeMs = now
-        lastOrderDetectedTime = System.currentTimeMillis() + 5000L
+        lastOrderDetectedTime = System.currentTimeMillis()
 
         val startX: Float
         val startY: Float
@@ -3597,36 +3646,19 @@ class AutoPickService : AccessibilityService() {
         showTouchIndicator(startX, startY)
         showTouchIndicator(endX, endY)
 
-        var deltaX = endX - startX
-        var deltaY = endY - startY
-        val distance = kotlin.math.hypot(deltaX.toDouble(), deltaY.toDouble()).toFloat()
-
-        if (distance < 10f) {
-            deltaX = if (startX < screenWidth / 2f) screenWidth * 0.75f else -screenWidth * 0.75f
-            deltaY = 0f
-        } else if (distance < 400f) {
-            val scale = 500f / distance
-            deltaX *= scale
-            deltaY *= scale
-        } else {
-            deltaX *= 2f
-            deltaY *= 2f
-        }
-
-        val adjustedEndX = (startX + deltaX).coerceIn(0f, screenWidth)
-        val adjustedEndY = (startY + deltaY).coerceIn(0f, screenHeight)
-
         val path = Path().apply {
             moveTo(startX, startY)
-            lineTo(adjustedEndX, adjustedEndY)
+            lineTo(endX, endY)
         }
 
-        val swipeDuration = swipeDurationMs.coerceIn(1L, 500L)
-        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, swipeDuration)).build()
+        // Vuốt ngược kéo đều, êm ái: Không boost véc-tơ fling, thời gian 60-90ms (chậm gấp đôi vuốt xuôi)
+        val reverseDuration = (swipeDurationMs * 2).coerceIn(60L, 90L)
+        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, reverseDuration)).build()
 
         val dispatched = dispatchGesture(gesture, null, null)
-        Log.i("HK_BENCHMARK", "DISPATCH_REVERSE_SWIPE interval=${interval}ms duration=${swipeDuration}ms speedLevel=$speedLevel queued=$dispatched start=($startX,$startY) end=($adjustedEndX,$adjustedEndY)")
-        return if (dispatched) swipeDuration else 0L
+        pausePollingUntil = System.currentTimeMillis() + reverseDuration + 70L
+        Log.i("HK_BENCHMARK", "DISPATCH_REVERSE_SWIPE interval=${interval}ms duration=${reverseDuration}ms speedLevel=$speedLevel queued=$dispatched start=($startX,$startY) end=($endX,$endY)")
+        return if (dispatched) reverseDuration else 0L
     }
 
     private fun performAcceptOrder(
