@@ -1800,13 +1800,10 @@ class AutoPickService : AccessibilityService() {
         }
 
         // 0.B KIỂM TRA MÀN HÌNH HẾT ĐƠN / TRỐNG ĐƠN TỪ EVENT -> BẤM TẢI LẠI TRANG / LOAD
-        val isEventEmptyState = eventHint.contains("khong con don hang nao") || 
-                               eventHint.contains("khong co don thuoc dang free-pick") ||
-                               eventHint.contains("hien dang khong co don") ||
-                               (eventHint.contains("tai lai trang") && !eventHint.contains("bi quyet"))
+        val isEventEmptyState = isTrulyEmptyOrEndOfDeckScreen(event.source, eventHint)
         if (isEventEmptyState) {
             val now = System.currentTimeMillis()
-            if (now - lastRefreshTime < loadRefreshIntervalMs) return
+            if (now - lastRefreshTime < 450L) return
             val src = event.source
             if (selectBestOrderEnabled && bestOrderState == BestOrderState.SCANNING && scannedDeck.isNotEmpty()) {
                 handleEndOfDeckOrEmptyScreen(src)
@@ -2417,45 +2414,18 @@ class AutoPickService : AccessibilityService() {
             }
         }
 
-        // 2. NẾU KHÔNG CÓ MỎ NEO: KIỂM TRA THÔNG BÁO HẾT ĐƠN (PHÂN BIỆT RẠCH RÒI TRẠNG THÁI A & B)
+        // 2. NẾU KHÔNG CÓ MỎ NEO: KIỂM TRA MÀN HÌNH HẾT ĐƠN BẰNG HÀM CHUẨN XÁC
         if (!foundOrder && rootNode != null) {
-            val emptyKw = listOf("Không còn đơn", "không còn đơn", "Không có đơn", "không có đơn", "Hiện đang không có đơn", "hiện đang không có đơn", "Tải lại trang", "tải lại trang")
-            var isStateA = false // "Không còn đơn hàng nào" / "Tải lại trang"
-            var isStateB = false // "Hiện đang không có đơn thuộc dạng free-pick"
-            for (kw in emptyKw) {
-                val nodes = try { rootNode.findAccessibilityNodeInfosByText(kw) } catch (_: Exception) { null }
-                if (!nodes.isNullOrEmpty()) {
-                    for (n in nodes) {
-                        val txt = removeAccents((n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()).lowercase()
-                        if (txt.contains("khong co don thuoc dang free-pick") || txt.contains("hien dang khong co don") || (txt.contains("khong co don") && !txt.contains("lay hang") && !txt.contains("giao"))) {
-                            isStateB = true
-                        } else if (txt.contains("khong con don") || txt.contains("tai lai trang") || (txt.contains("tai lai") && !txt.contains("bi quyet"))) {
-                            isStateA = true
-                        }
-                        try { n.recycle() } catch (_: Exception) {}
-                    }
-                }
-                if (isStateB || isStateA) break
-            }
-            if (isStateB) {
-                // Trạng thái B: Khu vực hoàn toàn không có đơn free-pick
-                // CẢNH BÁO: TUYỆT ĐỐI KHÔNG CLICK VÀO LINK "Xem bí quyết tăng tỉ lệ nhận đơn tại đây"!
-                // CHỈ bấm vào tọa độ hồng tâm nút LOAD (targetRefresh).
-                Log.i("HK_BENCHMARK", "EMPTY_STATE_B: Khong co don free-pick -> Chi bam nut Load Target (bo qua link bi quyet)")
-                resetBestOrderState()
-                tapRefreshTarget(force = false)
-                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
-                return
-            } else if (isStateA) {
-                // Trạng thái A: Đã vuốt hết các đơn trong danh sách
-                Log.i("HK_BENCHMARK", "EMPTY_STATE_A: Khong con don hang nao")
-                if (selectBestOrderEnabled) {
+            val isEmpty = isTrulyEmptyOrEndOfDeckScreen(rootNode, lowerRawText)
+            if (isEmpty) {
+                Log.i("HK_BENCHMARK", "EMPTY_SCREEN_DETECTED -> Tải lại trang!")
+                if (selectBestOrderEnabled && bestOrderState == BestOrderState.SCANNING && scannedDeck.isNotEmpty()) {
                     handleEndOfDeckOrEmptyScreen(rootNode)
                 } else {
                     resetBestOrderState()
                     clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
-                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
+                pausePollingUntil = System.currentTimeMillis() + 250L
                 return
             }
         }
@@ -3322,42 +3292,19 @@ class AutoPickService : AccessibilityService() {
             isWaitingToSwipe = false
 
             val lowerFullText = removeAccents(currentAllText.lowercase())
-            val isStateB = lowerFullText.contains("khong co don thuoc dang free-pick") || 
-                           lowerFullText.contains("hien dang khong co don") || 
-                           (lowerFullText.contains("khong co don") && !lowerFullText.contains("lay hang") && !lowerFullText.contains("giao"))
-            val isStateA = lowerFullText.contains("khong con don hang nao") || 
-                           (lowerFullText.contains("tai lai trang") && !lowerFullText.contains("bi quyet"))
+            val isEmpty = isTrulyEmptyOrEndOfDeckScreen(rootNode, lowerFullText)
 
-            if (isStateB) {
-                // Trạng thái B: Khu vực hoàn toàn không có đơn free-pick
-                // TUYỆT ĐỐI KHÔNG CLICK VÀO LINK "Xem bí quyết...", CHỈ BẤM HỒNG TÂM NÚT LOAD
-                Log.i("HK_BENCHMARK", "EMPTY_STATE_B_FULLTEXT: Khong co don free-pick -> Chi bam nut Load Target")
-                resetBestOrderState()
-                tapRefreshTarget(force = false)
-                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
-            } else if (isStateA) {
-                // Trạng thái A: Đã vuốt hết các đơn trong danh sách
-                Log.i("HK_BENCHMARK", "EMPTY_STATE_A_FULLTEXT: Khong con don hang nao")
-                if (selectBestOrderEnabled) {
+            if (isEmpty) {
+                Log.i("HK_BENCHMARK", "EMPTY_SCREEN_FULLTEXT_DETECTED -> Tải lại trang!")
+                if (selectBestOrderEnabled && bestOrderState == BestOrderState.SCANNING && scannedDeck.isNotEmpty()) {
                     handleEndOfDeckOrEmptyScreen(rootNode)
                 } else {
                     resetBestOrderState()
                     clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
-                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
+                pausePollingUntil = System.currentTimeMillis() + 250L
             } else if (selectBestOrderEnabled && bestOrderState == BestOrderState.REVERSING) {
                 handleEndOfDeckOrEmptyScreen(rootNode)
-            } else {
-                // Màn hình hoàn toàn không có thông báo: chỉ bấm Load khi đã chờ ít nhất 2500ms mà không có dữ liệu
-                val now = System.currentTimeMillis()
-                if (emptyScreenStartTime == 0L) {
-                    emptyScreenStartTime = now
-                } else if (now - emptyScreenStartTime >= 2500L && now - lastRefreshTime >= loadRefreshIntervalMs) {
-                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE_2.5S -> Tu dong bam nut Load")
-                    emptyScreenStartTime = now
-                    tapRefreshTarget(force = false)
-                    pausePollingUntil = now + loadRefreshIntervalMs
-                }
             }
         }
     }
@@ -3366,10 +3313,9 @@ class AutoPickService : AccessibilityService() {
         val eligible = scannedDeck.filter { it.isEligible && !it.isFailed }
         return eligible.sortedWith(
             compareByDescending<ScannedOrder> { it.isTienChuyen }
-                .thenByDescending { if (bestOrderPrioritizeCount) it.orderCount else 0 }
-                .thenByDescending { if (bestOrderPrioritizePrice) it.price else 0.0 }
-                .thenByDescending { if (bestOrderPrioritizeRatio && it.distance > 0.0) it.price / it.distance else 0.0 }
-                .thenByDescending { if (bestOrderPrioritizePoints) it.points else 0 }
+                .thenByDescending { it.price }
+                .thenBy { it.distance }
+                .thenByDescending { it.orderCount }
         )
     }
 
@@ -3385,6 +3331,32 @@ class AutoPickService : AccessibilityService() {
         bestOrderReverseAttempts = 0
         scanSingleCardRetryCount = 0
         bestOrderAttemptCount = 0
+    }
+
+    private fun isTrulyEmptyOrEndOfDeckScreen(rootNode: AccessibilityNodeInfo?, lowerScreenText: String): Boolean {
+        // 1. Nếu trên màn hình ĐANG CÓ thẻ đơn hàng (có chữ ASAP, Điểm, hoặc nút Nhận đơn) -> TUYỆT ĐỐI KHÔNG PHẢI MÀN HÌNH TRỐNG!
+        if (lowerScreenText.contains("asap") || lowerScreenText.contains("nhan don") || lowerScreenText.contains("nap them tien ky quy")) {
+            return false
+        }
+        // 2. Chỉ tính là hết đơn / màn hình trống khi xuất hiện ĐÚNG câu thông báo của Shopee (Ảnh 5 & Ảnh 6):
+        if (lowerScreenText.contains("khong con don hang nao") ||
+            lowerScreenText.contains("vui long tai lai trang") ||
+            lowerScreenText.contains("hien dang khong co don thuoc dang free-pick") ||
+            lowerScreenText.contains("khong co don thuoc dang free-pick")) {
+            return true
+        }
+        // 3. Kiểm tra trực tiếp bằng Node như bản gốc 03-10:
+        if (rootNode != null) {
+            val khongConNodes = try { rootNode.findAccessibilityNodeInfosByText("Không còn đơn hàng nào") } catch (_: Exception) { null }
+            val freePickNodes = try { rootNode.findAccessibilityNodeInfosByText("không có đơn thuộc dạng free-pick") } catch (_: Exception) { null }
+            val taiLaiNodes = try { rootNode.findAccessibilityNodeInfosByText("Tải lại trang") } catch (_: Exception) { null }
+            val found = !khongConNodes.isNullOrEmpty() || !freePickNodes.isNullOrEmpty() || !taiLaiNodes.isNullOrEmpty()
+            khongConNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            freePickNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            taiLaiNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
+            if (found) return true
+        }
+        return false
     }
 
     private fun handleEndOfDeckOrEmptyScreen(rootNode: AccessibilityNodeInfo? = null) {
@@ -3447,73 +3419,19 @@ class AutoPickService : AccessibilityService() {
         }
     }
 
-    private fun clickTaiLaiTrangOrTapRefresh(rootNode: AccessibilityNodeInfo?) {
-        val now = System.currentTimeMillis()
-        if (now - lastRefreshTime < loadRefreshIntervalMs) return
-        var clicked = false
-        if (rootNode != null) {
-            val searchLabels = listOf("Tải lại trang", "Tải lại", "tai lai trang", "tai lai")
-            for (lbl in searchLabels) {
-                val nodes = try { rootNode.findAccessibilityNodeInfosByText(lbl) } catch (_: Exception) { null }
-                if (!nodes.isNullOrEmpty()) {
-                    for (n in nodes) {
-                        val txt = (n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()
-                        val lower = removeAccents(txt.lowercase())
-                        // TUYỆT ĐỐI KHÔNG CLICK VÀO "Xem bí quyết..." hay link web
-                        if (lower.contains("bi quyet") || lower.contains("ti le")) {
-                            try { n.recycle() } catch (_: Exception) {}
-                            continue
-                        }
-                        if (lower.contains("tai lai")) {
-                            val clickable = getClickableNode(n) ?: n
-                            clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                            if (!clicked) {
-                                val bounds = android.graphics.Rect()
-                                n.getBoundsInScreen(bounds)
-                                if (!bounds.isEmpty && bounds.centerX() > 0 && bounds.centerY() > 0) {
-                                    showTouchIndicator(bounds.centerX().toFloat(), bounds.centerY().toFloat())
-                                    val path = Path().apply { moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat()) }
-                                    val gesture = GestureDescription.Builder()
-                                        .addStroke(GestureDescription.StrokeDescription(path, 0, 40)).build()
-                                    clicked = dispatchGesture(gesture, null, null)
-                                }
-                            }
-                            Log.i("HK_BENCHMARK", "CLICK_TAI_LAI_TRANG success=$clicked")
-                        }
-                        try { n.recycle() } catch (_: Exception) {}
-                        if (clicked) break
-                    }
-                }
-                if (clicked) break
-            }
-        }
-        if (clicked) {
-            val finishTime = System.currentTimeMillis()
-            lastOrderDetectedTime = finishTime
-            lastRefreshTime = finishTime
-            lastSwipedCardFingerprint = ""
-            lastSwipedCardExpiresAt = 0L
-            emptyScreenStartTime = 0L
-            lastRejectedFingerprint = ""
-            rejectedRepeatCount = 0
-            pausePollingUntil = finishTime + loadRefreshIntervalMs
-            resetFreePickConfirmation()
-            lastAcceptedTime = 0L
-        } else {
-            // Chỉ bấm hồng tâm khi chưa bấm được nút chữ Tải lại trang
-            tapRefreshTarget(force = false)
-        }
-    }
-
     private fun tapRefreshTarget(force: Boolean = false) {
         if (!isDriverAppForeground()) return
 
-        // Rate-limit Load while continuing to scan for newly loaded orders.
         val now = System.currentTimeMillis()
-        if (!force && now - lastRefreshTime < loadRefreshIntervalMs) return
+        // Cooldown chuẩn: Ngăn chặn tuyệt đối việc bấm Load liên tục trong cùng 1 giây!
+        val minCooldown = if (force) 450L else 800L
+        if (now - lastRefreshTime < minCooldown) return
         lastRefreshTime = now
+
         resetFreePickConfirmation()
         lastAcceptedTime = 0L
+        lastSwipedCardFingerprint = ""
+        lastSwipedCardExpiresAt = 0L
 
         val x: Float
         val y: Float
@@ -3530,21 +3448,60 @@ class AutoPickService : AccessibilityService() {
 
         showTouchIndicator(x, y)
         val path = Path().apply { moveTo(x, y) }
-        val gesture = GestureDescription.Builder().addStroke(GestureDescription.StrokeDescription(path, 0, 40)).build()
+        val gesture = GestureDescription.Builder()
+            .addStroke(GestureDescription.StrokeDescription(path, 0, 25))
+            .build()
 
-        // ===== SAU KHI BẤM LOAD: NẾU CÓ ĐƠN LÀ LỰA LIỀN =====
-        // 1. Cập nhật thời gian nhận diện
-        lastOrderDetectedTime = now
-        // 2. Xóa sạch cờ ghi nhớ đơn cũ để lập tức chấp nhận và phân tích thẻ đơn mới vừa load
-        lastSwipedCardFingerprint = ""
-        lastSwipedCardExpiresAt = 0L
-        emptyScreenStartTime = 0L
-        lastRejectedFingerprint = ""
-        rejectedRepeatCount = 0
-        pausePollingUntil = now + loadRefreshIntervalMs
-
-        // 3. Phát cử chỉ bấm Load, không gọi quét ngay lập tức để tránh vòng lặp bấm Load liên tục
+        // Tạm dừng quét 250ms sau khi bấm Load để chờ Shopee phản hồi dữ liệu mới, KHÔNG gọi đệ quy ngay lập tức!
+        pausePollingUntil = now + 250L
         dispatchGesture(gesture, null, null)
+    }
+
+    private fun clickTaiLaiTrangOrTapRefresh(rootNode: AccessibilityNodeInfo?) {
+        val now = System.currentTimeMillis()
+        if (now - lastRefreshTime < 450L) return
+
+        var clicked = false
+        if (rootNode != null) {
+            val nodes = try { rootNode.findAccessibilityNodeInfosByText("Tải lại trang") } catch (_: Exception) { null }
+            if (!nodes.isNullOrEmpty()) {
+                for (n in nodes) {
+                    val txt = removeAccents((n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()).lowercase()
+                    // Tuyệt đối né dòng link "Xem bí quyết tăng tỉ lệ nhận đơn tại đây"
+                    if (txt.contains("bi quyet") || txt.contains("ti le")) {
+                        try { n.recycle() } catch (_: Exception) {}
+                        continue
+                    }
+                    if (txt.contains("tai lai trang")) {
+                        val clickable = getClickableNode(n) ?: n
+                        clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                        if (!clicked) {
+                            val bounds = android.graphics.Rect()
+                            n.getBoundsInScreen(bounds)
+                            if (!bounds.isEmpty && bounds.centerX() > 0 && bounds.centerY() > 0) {
+                                showTouchIndicator(bounds.centerX().toFloat(), bounds.centerY().toFloat())
+                                val path = Path().apply { moveTo(bounds.centerX().toFloat(), bounds.centerY().toFloat()) }
+                                val gesture = GestureDescription.Builder()
+                                    .addStroke(GestureDescription.StrokeDescription(path, 0, 35)).build()
+                                clicked = dispatchGesture(gesture, null, null)
+                            }
+                        }
+                    }
+                    try { n.recycle() } catch (_: Exception) {}
+                    if (clicked) break
+                }
+            }
+        }
+        if (clicked) {
+            lastRefreshTime = now
+            pausePollingUntil = now + 250L
+            lastSwipedCardFingerprint = ""
+            lastSwipedCardExpiresAt = 0L
+            resetFreePickConfirmation()
+            lastAcceptedTime = 0L
+        } else {
+            tapRefreshTarget(force = true)
+        }
     }
 
 
