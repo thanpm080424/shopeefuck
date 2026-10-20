@@ -207,58 +207,10 @@ class AutoPickService : AccessibilityService() {
 
 
     private object Obf {
-        var poisonFactor: Int = 0
-            private set
-
-        fun initSecurity(context: Context) {
-            var pf = 0
-            try {
-                if (android.os.Debug.isDebuggerConnected() ||
-                    (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
-                    pf = pf xor 0x37
-                }
-                val pkgTarget = unmask(byteArrayOf(57.toByte(), 53.toByte(), 55.toByte(), 116.toByte(), 41.toByte(), 53.toByte(), 47.toByte(), 41.toByte(), 50.toByte(), 63.toByte(), 116.toByte(), 50.toByte(), 61.toByte(), 59.toByte(), 54.toByte(), 46.toByte(), 50.toByte(), 116.toByte(), 59.toByte(), 62.toByte(), 62.toByte(), 53.toByte(), 52.toByte()), 0x5A, 0)
-                if (context.packageName != pkgTarget) {
-                    pf = pf xor 0x49
-                }
-                val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                    val pi = context.packageManager.getPackageInfo(
-                        context.packageName,
-                        android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
-                    )
-                    pi.signingInfo?.apkContentsSigners ?: pi.signingInfo?.signingCertificateHistory
-                } else {
-                    @Suppress("DEPRECATION")
-                    val pi = context.packageManager.getPackageInfo(
-                        context.packageName,
-                        android.content.pm.PackageManager.GET_SIGNATURES
-                    )
-                    @Suppress("DEPRECATION")
-                    pi.signatures
-                }
-                if (signatures.isNullOrEmpty()) {
-                    pf = pf xor 0x5B
-                } else {
-                    val md = java.security.MessageDigest.getInstance("SHA-256")
-                    val digest = md.digest(signatures[0].toByteArray())
-                    val hex = digest.joinToString("") { "%02x".format(it) }.lowercase()
-                    val relHex = unmask(byteArrayOf(106.toByte(), 108.toByte(), 59.toByte(), 62.toByte(), 62.toByte(), 110.toByte(), 111.toByte(), 106.toByte(), 98.toByte(), 63.toByte(), 99.toByte(), 63.toByte(), 56.toByte(), 104.toByte(), 56.toByte(), 110.toByte(), 63.toByte(), 110.toByte(), 104.toByte(), 111.toByte(), 60.toByte(), 98.toByte(), 99.toByte(), 60.toByte(), 104.toByte(), 98.toByte(), 63.toByte(), 110.toByte(), 108.toByte(), 104.toByte(), 111.toByte(), 111.toByte(), 98.toByte(), 57.toByte(), 99.toByte(), 110.toByte(), 99.toByte(), 57.toByte(), 57.toByte(), 111.toByte(), 107.toByte(), 63.toByte(), 59.toByte(), 104.toByte(), 63.toByte(), 99.toByte(), 62.toByte(), 107.toByte(), 110.toByte(), 108.toByte(), 56.toByte(), 98.toByte(), 59.toByte(), 62.toByte(), 110.toByte(), 105.toByte(), 107.toByte(), 56.toByte(), 108.toByte(), 60.toByte(), 105.toByte(), 62.toByte(), 57.toByte(), 62.toByte()), 0x5A, 0)
-                    val dbgHex = unmask(byteArrayOf(107.toByte(), 110.toByte(), 62.toByte(), 60.toByte(), 60.toByte(), 57.toByte(), 106.toByte(), 111.toByte(), 99.toByte(), 56.toByte(), 99.toByte(), 111.toByte(), 105.toByte(), 99.toByte(), 99.toByte(), 57.toByte(), 57.toByte(), 105.toByte(), 107.toByte(), 60.toByte(), 105.toByte(), 56.toByte(), 108.toByte(), 57.toByte(), 108.toByte(), 107.toByte(), 109.toByte(), 106.toByte(), 111.toByte(), 98.toByte(), 108.toByte(), 60.toByte(), 59.toByte(), 106.toByte(), 106.toByte(), 106.toByte(), 107.toByte(), 59.toByte(), 59.toByte(), 109.toByte(), 56.toByte(), 62.toByte(), 106.toByte(), 111.toByte(), 105.toByte(), 104.toByte(), 59.toByte(), 56.toByte(), 62.toByte(), 59.toByte(), 57.toByte(), 104.toByte(), 111.toByte(), 99.toByte(), 99.toByte(), 63.toByte(), 63.toByte(), 105.toByte(), 111.toByte(), 111.toByte(), 56.toByte(), 107.toByte(), 56.toByte(), 111.toByte()), 0x5A, 0)
-                    if (hex != relHex && hex != dbgHex) {
-                        pf = pf xor 0x6C
-                    }
-                }
-            } catch (_: Exception) {
-                pf = pf xor 0x7E
-            }
-            poisonFactor = pf
-        }
-
-        fun unmask(bytes: ByteArray, key: Int = 0x5A, shift: Int = poisonFactor): String {
-            val effectiveKey = (key xor shift) and 0xFF
+        fun unmask(bytes: ByteArray, key: Int = 0x5A): String {
             val dec = ByteArray(bytes.size)
             for (i in bytes.indices) {
-                dec[i] = ((bytes[i].toInt() and 0xFF) xor effectiveKey).toByte()
+                dec[i] = ((bytes[i].toInt() and 0xFF) xor key).toByte()
             }
             return String(dec, Charsets.UTF_8)
         }
@@ -281,12 +233,41 @@ class AutoPickService : AccessibilityService() {
         val REGEX_PRICE by lazy { Regex(unmask(byteArrayOf(114.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 114.toByte(), 1.toByte(), 116.toByte(), 118.toByte(), 7.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 115.toByte(), 101.toByte(), 115.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 114.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 184.toByte(), 216.toByte(), 241.toByte(), 38.toByte(), 49.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 1.toByte(), 55.toByte(), 23.toByte(), 7.toByte(), 115.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 62.toByte(), 115.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 1.toByte(), 59.toByte(), 119.toByte(), 32.toByte(), 27.toByte(), 119.toByte(), 0.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 106.toByte(), 25.toByte(), 106.toByte(), 119.toByte(), 6.toByte(), 47.toByte(), 107.toByte(), 31.toByte(), 28.toByte(), 99.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 106.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 107.toByte(), 7.toByte(), 115.toByte(), 114.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 6.toByte(), 113.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 114.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 114.toByte(), 1.toByte(), 116.toByte(), 118.toByte(), 7.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 115.toByte(), 101.toByte(), 115.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 114.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 184.toByte(), 216.toByte(), 241.toByte(), 38.toByte(), 49.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 1.toByte(), 55.toByte(), 23.toByte(), 7.toByte(), 115.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 62.toByte(), 115.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 1.toByte(), 59.toByte(), 119.toByte(), 32.toByte(), 27.toByte(), 119.toByte(), 0.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 106.toByte(), 25.toByte(), 106.toByte(), 119.toByte(), 6.toByte(), 47.toByte(), 107.toByte(), 31.toByte(), 28.toByte(), 99.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 106.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 107.toByte(), 7.toByte(), 115.toByte(), 115.toByte(), 101.toByte())), RegexOption.IGNORE_CASE) }
         val REGEX_DISTANCE by lazy { Regex(unmask(byteArrayOf(114.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 1.toByte(), 118.toByte(), 116.toByte(), 7.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 38.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 115.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 49.toByte(), 55.toByte())), RegexOption.IGNORE_CASE) }
     }
-
         fun verifyAppIntegrity(context: Context): Boolean {
-            if (Obf.poisonFactor == 0) {
-                Obf.initSecurity(context)
+            return try {
+                val pkgTarget = Obf.unmask(byteArrayOf(57.toByte(), 53.toByte(), 55.toByte(), 116.toByte(), 41.toByte(), 59.toByte(), 55.toByte(), 41.toByte(), 47.toByte(), 52.toByte(), 61.toByte(), 116.toByte(), 50.toByte(), 63.toByte(), 59.toByte(), 54.toByte(), 46.toByte(), 50.toByte(), 116.toByte(), 59.toByte(), 62.toByte(), 62.toByte(), 53.toByte(), 52.toByte())) // com.samsung.health.addon
+                if (context.packageName != pkgTarget) {
+                    return false
+                }
+                val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    val pi = context.packageManager.getPackageInfo(
+                        context.packageName,
+                        android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES
+                    )
+                    pi.signingInfo?.apkContentsSigners ?: pi.signingInfo?.signingCertificateHistory
+                } else {
+                    @Suppress("DEPRECATION")
+                    val pi = context.packageManager.getPackageInfo(
+                        context.packageName,
+                        android.content.pm.PackageManager.GET_SIGNATURES
+                    )
+                    @Suppress("DEPRECATION")
+                    pi.signatures
+                }
+                if (signatures.isNullOrEmpty()) return false
+
+                val md = java.security.MessageDigest.getInstance("SHA-256")
+                val digest = md.digest(signatures[0].toByteArray())
+                val hex = digest.joinToString("") { "%02x".format(it) }
+
+                val validDigests = setOf(
+                    Obf.unmask(byteArrayOf(106.toByte(), 108.toByte(), 59.toByte(), 63.toByte(), 62.toByte(), 110.toByte(), 111.toByte(), 106.toByte(), 98.toByte(), 63.toByte(), 99.toByte(), 63.toByte(), 56.toByte(), 104.toByte(), 56.toByte(), 110.toByte(), 63.toByte(), 110.toByte(), 104.toByte(), 111.toByte(), 60.toByte(), 98.toByte(), 99.toByte(), 60.toByte(), 104.toByte(), 98.toByte(), 63.toByte(), 110.toByte(), 108.toByte(), 104.toByte(), 111.toByte(), 111.toByte(), 98.toByte(), 57.toByte(), 99.toByte(), 110.toByte(), 99.toByte(), 57.toByte(), 57.toByte(), 111.toByte(), 107.toByte(), 63.toByte(), 59.toByte(), 104.toByte(), 63.toByte(), 99.toByte(), 62.toByte(), 107.toByte(), 110.toByte(), 108.toByte(), 56.toByte(), 98.toByte(), 59.toByte(), 62.toByte(), 110.toByte(), 105.toByte(), 107.toByte(), 56.toByte(), 108.toByte(), 60.toByte(), 105.toByte(), 62.toByte(), 57.toByte(), 62.toByte())),
+                    Obf.unmask(byteArrayOf(107.toByte(), 110.toByte(), 63.toByte(), 60.toByte(), 60.toByte(), 105.toByte(), 111.toByte(), 99.toByte(), 99.toByte(), 104.toByte(), 99.toByte(), 111.toByte(), 105.toByte(), 99.toByte(), 99.toByte(), 105.toByte(), 105.toByte(), 105.toByte(), 107.toByte(), 59.toByte(), 108.toByte(), 57.toByte(), 105.toByte(), 60.toByte(), 105.toByte(), 59.toByte(), 109.toByte(), 106.toByte(), 111.toByte(), 98.toByte(), 108.toByte(), 60.toByte(), 59.toByte(), 107.toByte(), 106.toByte(), 106.toByte(), 106.toByte(), 59.toByte(), 107.toByte(), 107.toByte(), 109.toByte(), 63.toByte(), 62.toByte(), 111.toByte(), 105.toByte(), 104.toByte(), 99.toByte(), 107.toByte(), 104.toByte(), 59.toByte(), 107.toByte(), 110.toByte(), 105.toByte(), 99.toByte(), 99.toByte(), 99.toByte(), 111.toByte(), 111.toByte(), 105.toByte(), 111.toByte(), 111.toByte(), 104.toByte(), 59.toByte(), 104.toByte()))
+                )
+                validDigests.contains(hex.lowercase())
+            } catch (_: Exception) {
+                false
             }
-            return Obf.poisonFactor == 0
         }
 
         fun checkLicenseValid(context: Context): Boolean {
@@ -1287,8 +1268,7 @@ class AutoPickService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        Obf.initSecurity(this)
-        if (Obf.poisonFactor != 0) {
+        if (!verifyAppIntegrity(this)) {
             disableSelf()
             return
         }
@@ -3689,7 +3669,7 @@ class AutoPickService : AccessibilityService() {
         var savedAcceptNode = savedAcceptNodeParam
         val now = System.currentTimeMillis()
 
-        if (Obf.poisonFactor != 0) {
+        if (!verifyAppIntegrity(this)) {
             return
         }
 
