@@ -81,6 +81,7 @@ class AutoPickService : AccessibilityService() {
         var bestOrderPrioritizeRatio = true
         var bestOrderPrioritizeCount = true
         var bestOrderPrioritizePoints = false
+        var loadRefreshIntervalMs: Long = 500L
 
         var maxFoodDistance = 1.0
 
@@ -1402,6 +1403,12 @@ class AutoPickService : AccessibilityService() {
             bestOrderPrioritizeRatio = savedBoolean("bestOrderPrioritizeRatio", "bestOrderPrioritizeRatio", true)
             bestOrderPrioritizeCount = savedBoolean("bestOrderPrioritizeCount", "bestOrderPrioritizeCount", true)
             bestOrderPrioritizePoints = savedBoolean("bestOrderPrioritizePoints", "bestOrderPrioritizePoints", false)
+            loadRefreshIntervalMs = if (snapshot?.has("loadRefreshIntervalMs") == true) {
+                snapshot.optLong("loadRefreshIntervalMs", 500L)
+            } else {
+                try { prefs.getLong("flutter.loadRefreshIntervalMs", 500L) }
+                catch (_: Exception) { prefs.getInt("flutter.loadRefreshIntervalMs", 500).toLong() }
+            }.coerceIn(100L, 2000L)
 
             tcEnabled = savedBoolean("tcEnabled", "tcEnabled", false)
             tcDistrict = savedString("tcDistrict", "tcDistrict", "")
@@ -1784,7 +1791,7 @@ class AutoPickService : AccessibilityService() {
             awaitingPopupConfirmation = false
             lastAcceptedTime = 0L
             dismissMissedOrderDialog(event.source)
-            pausePollingUntil = System.currentTimeMillis() + 400L
+            pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
             handler.postDelayed({
                 tapRefreshTarget(force = true)
             }, 300L)
@@ -2155,7 +2162,7 @@ class AutoPickService : AccessibilityService() {
             awaitingPopupConfirmation = false
             lastAcceptedTime = 0L
             dismissMissedOrderDialog(rootNode)
-            pausePollingUntil = System.currentTimeMillis() + 400L
+            pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
             handler.postDelayed({
                 tapRefreshTarget(force = true)
             }, 300L)
@@ -2435,7 +2442,7 @@ class AutoPickService : AccessibilityService() {
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_B: Khong co don free-pick -> Chi bam nut Load Target (bo qua link bi quyet)")
                 resetBestOrderState()
                 tapRefreshTarget(force = false)
-                pausePollingUntil = System.currentTimeMillis() + 400L
+                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
                 return
             } else if (isStateA) {
                 // Trạng thái A: Đã vuốt hết các đơn trong danh sách
@@ -2446,7 +2453,7 @@ class AutoPickService : AccessibilityService() {
                     resetBestOrderState()
                     clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
-                pausePollingUntil = System.currentTimeMillis() + 400L
+                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
                 return
             }
         }
@@ -3128,7 +3135,7 @@ class AutoPickService : AccessibilityService() {
                             rejectedRepeatCount = 0
                             resetBestOrderState()
                             clickTaiLaiTrangOrTapRefresh(rootNode)
-                            pausePollingUntil = System.currentTimeMillis() + 400L
+                            pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
                             return
                         }
 
@@ -3322,7 +3329,7 @@ class AutoPickService : AccessibilityService() {
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_B_FULLTEXT: Khong co don free-pick -> Chi bam nut Load Target")
                 resetBestOrderState()
                 tapRefreshTarget(force = false)
-                pausePollingUntil = System.currentTimeMillis() + 400L
+                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
             } else if (isStateA) {
                 // Trạng thái A: Đã vuốt hết các đơn trong danh sách
                 Log.i("HK_BENCHMARK", "EMPTY_STATE_A_FULLTEXT: Khong con don hang nao")
@@ -3332,7 +3339,7 @@ class AutoPickService : AccessibilityService() {
                     resetBestOrderState()
                     clickTaiLaiTrangOrTapRefresh(rootNode)
                 }
-                pausePollingUntil = System.currentTimeMillis() + 400L
+                pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
             } else if (selectBestOrderEnabled && bestOrderState == BestOrderState.REVERSING) {
                 handleEndOfDeckOrEmptyScreen(rootNode)
             } else {
@@ -3341,12 +3348,12 @@ class AutoPickService : AccessibilityService() {
                 if (emptyScreenStartTime == 0L) {
                     emptyScreenStartTime = now
                     tapRefreshTarget(force = false)
-                    pausePollingUntil = now + 400L
-                } else if (now - lastRefreshTime >= 400L) {
-                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE (400ms khong co don) -> Tu dong bam nut Load")
+                    pausePollingUntil = now + loadRefreshIntervalMs
+                } else if (now - lastRefreshTime >= loadRefreshIntervalMs) {
+                    Log.i("HK_BENCHMARK", "EMPTY_SCREEN_IDLE (${loadRefreshIntervalMs}ms khong co don) -> Tu dong bam nut Load")
                     emptyScreenStartTime = now
                     tapRefreshTarget(force = false)
-                    pausePollingUntil = now + 400L
+                    pausePollingUntil = now + loadRefreshIntervalMs
                 }
             }
         }
@@ -3482,7 +3489,7 @@ class AutoPickService : AccessibilityService() {
             emptyScreenStartTime = 0L
             lastRejectedFingerprint = ""
             rejectedRepeatCount = 0
-            pausePollingUntil = System.currentTimeMillis() + 350L
+            pausePollingUntil = System.currentTimeMillis() + loadRefreshIntervalMs
             resetFreePickConfirmation()
             lastAcceptedTime = 0L
         }
@@ -3495,7 +3502,7 @@ class AutoPickService : AccessibilityService() {
 
         // Rate-limit Load while continuing to scan for newly loaded orders.
         val now = System.currentTimeMillis()
-        if (!force && now - lastRefreshTime < 400L) return
+        if (!force && now - lastRefreshTime < loadRefreshIntervalMs) return
         lastRefreshTime = now
         resetFreePickConfirmation()
         lastAcceptedTime = 0L
@@ -3526,7 +3533,7 @@ class AutoPickService : AccessibilityService() {
         emptyScreenStartTime = 0L
         lastRejectedFingerprint = ""
         rejectedRepeatCount = 0
-        pausePollingUntil = now + 350L
+        pausePollingUntil = now + loadRefreshIntervalMs
 
         // 3. Quét ngay khi cử chỉ bấm nút Load vừa hoàn tất (20ms)
         dispatchGesture(gesture, object : AccessibilityService.GestureResultCallback() {

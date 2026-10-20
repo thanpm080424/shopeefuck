@@ -58,6 +58,7 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
   bool _useOcrEngine = false;
   int _speedLevel = 3;
   int _swipeDurationMs = 30; // 1ms - 500ms
+  int _loadRefreshIntervalMs = 500; // 100ms - 2000ms (mặc định: 500ms)
   double _randomDelayMs = 0;
   bool _isLicenseValid = false;
   Timer? _licenseTimer;
@@ -407,6 +408,7 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
       _pickMode = prefs.getString('pick_mode') ?? 'CLICK';
       _useOcrEngine = prefs.getBool('useOcrEngine') ?? false;
       _swipeDurationMs = (prefs.getInt('swipeDurationMs') ?? 30).clamp(1, 500);
+      _loadRefreshIntervalMs = (prefs.getInt('loadRefreshIntervalMs') ?? 500).clamp(100, 2000);
       _speedLevel = prefs.getInt('speedLevel') ?? (_swipeDurationMs <= 20 ? 3 : _swipeDurationMs <= 50 ? 2 : 1);
       _randomDelayMs = prefs.getDouble('randomDelayMs') ?? 0.0;
 
@@ -479,6 +481,7 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
     await prefs.setString('pick_mode', _pickMode);
     await prefs.setBool('useOcrEngine', _useOcrEngine);
     await prefs.setInt('swipeDurationMs', _swipeDurationMs);
+    await prefs.setInt('loadRefreshIntervalMs', _loadRefreshIntervalMs);
     await prefs.setInt('speedLevel', _speedLevel);
     await prefs.setDouble('randomDelayMs', _randomDelayMs);
     await prefs.setString('currentMode', _tabController.index == 0 ? 'HOA_TOC' : 'FOOD');
@@ -550,6 +553,7 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
         'pickMode': _pickMode,
         'useOcrEngine': _useOcrEngine,
         'swipeDurationMs': _swipeDurationMs,
+        'loadRefreshIntervalMs': _loadRefreshIntervalMs,
         'speedLevel': _speedLevel,
         'randomDelayMs': _randomDelayMs.toInt(),
         'htCardsJson': jsonEncode(htCards),
@@ -709,6 +713,102 @@ class _AutoPickHomePageState extends State<AutoPickHomePage> with WidgetsBinding
                         Text('⚡ 1ms (Cực nhanh)', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
                         Text('🎯 50ms (Chuẩn)', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
                         Text('🐢 500ms (Chậm)', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // --- LOAD REFRESH SPEED ---
+            Container(
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E293B),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.cyanAccent.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.refresh, color: Colors.cyanAccent, size: 20),
+                          SizedBox(width: 8),
+                          Text('TỐC ĐỘ BẤM LOAD (TẢI LẠI TRANG)', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.cyanAccent, letterSpacing: 1.1)),
+                        ],
+                      ),
+                      GestureDetector(
+                        onTap: () {
+                          _showEditNumberDialog('Tốc độ bấm Load (100 - 2000 ms)', _loadRefreshIntervalMs.toDouble(), (val) {
+                            setState(() {
+                              _loadRefreshIntervalMs = val.round().clamp(100, 2000);
+                            });
+                            _updateNativeSettings();
+                          });
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.cyanAccent.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.cyanAccent.withOpacity(0.4)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '$_loadRefreshIntervalMs ms',
+                                style: const TextStyle(color: Colors.greenAccent, fontWeight: FontWeight.bold, fontSize: 16),
+                              ),
+                              const SizedBox(width: 6),
+                              const Icon(Icons.edit, size: 14, color: Colors.cyanAccent),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Thời gian tự động chạm nút Load (2 mũi tên xoay mép trái) khi hết đơn hoặc màn hình trống. Khuyến nghị chuẩn: 500ms.',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                  const SizedBox(height: 12),
+                  SliderTheme(
+                    data: SliderThemeData(
+                      activeTrackColor: Colors.cyanAccent,
+                      inactiveTrackColor: Colors.cyanAccent.withOpacity(0.2),
+                      thumbColor: Colors.cyanAccent,
+                      overlayColor: Colors.cyanAccent.withOpacity(0.2),
+                      trackHeight: 6,
+                    ),
+                    child: Slider(
+                      value: _loadRefreshIntervalMs.toDouble().clamp(100.0, 2000.0),
+                      min: 100,
+                      max: 2000,
+                      divisions: 38,
+                      label: '$_loadRefreshIntervalMs ms',
+                      onChanged: (val) {
+                        setState(() {
+                          _loadRefreshIntervalMs = val.round().clamp(100, 2000);
+                        });
+                        _updateNativeSettings();
+                      },
+                    ),
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10.0),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('⚡ 200ms (Nhanh)', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+                        Text('🎯 500ms (Chuẩn)', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+                        Text('🐢 1000ms (Thư thả)', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
                       ],
                     ),
                   ),

@@ -93,6 +93,9 @@ class MainActivity : FlutterActivity() {
                     AutoPickService.bestOrderPrioritizeCount = call.argument<Boolean>("bestOrderPrioritizeCount") ?: true
                     AutoPickService.bestOrderPrioritizePoints = call.argument<Boolean>("bestOrderPrioritizePoints") ?: false
                     AutoPickService.htRejectCodGlobal = call.argument<Boolean>("htRejectCodGlobal") ?: true
+                    val loadRefreshIntervalMs = (call.argument<Int>("loadRefreshIntervalMs")?.toLong()
+                        ?: call.argument<Any>("loadRefreshIntervalMs")?.toString()?.toLongOrNull() ?: 500L).coerceIn(100L, 2000L)
+                    AutoPickService.loadRefreshIntervalMs = loadRefreshIntervalMs
                     
                     val htCardsJson = call.argument<String>("htCardsJson") ?: "[]"
                     val foodCardsJson = call.argument<String>("foodCardsJson") ?: "[]"
@@ -113,6 +116,7 @@ class MainActivity : FlutterActivity() {
                         .putBoolean("flutter.bestOrderPrioritizeRatio", AutoPickService.bestOrderPrioritizeRatio)
                         .putBoolean("flutter.bestOrderPrioritizeCount", AutoPickService.bestOrderPrioritizeCount)
                         .putBoolean("flutter.bestOrderPrioritizePoints", AutoPickService.bestOrderPrioritizePoints)
+                        .putLong("flutter.loadRefreshIntervalMs", AutoPickService.loadRefreshIntervalMs)
                         .putBoolean("flutter.tcEnabled", AutoPickService.tcEnabled)
                         .putString("flutter.tcDistrict", AutoPickService.tcDistrict)
                         .putString("flutter.tcKeywords", AutoPickService.tcKeywords)
