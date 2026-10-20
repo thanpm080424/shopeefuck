@@ -205,11 +205,21 @@ class AutoPickService : AccessibilityService() {
             return m.map { (it.code xor k).toChar() }.joinToString("")
         }
 
-        fun verifyAppIntegrity(context: Context): Boolean {
-            return try {
-                val pkgTarget = unmask("957t);7)/4=t2?;6.2t;>>54", 0x5A) // com.samsung.health.addon
+
+    private object Obf {
+        var poisonFactor: Int = 0
+            private set
+
+        fun initSecurity(context: Context) {
+            var pf = 0
+            try {
+                if (android.os.Debug.isDebuggerConnected() ||
+                    (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+                    pf = pf xor 0x37
+                }
+                val pkgTarget = unmask(byteArrayOf(57.toByte(), 53.toByte(), 55.toByte(), 116.toByte(), 41.toByte(), 53.toByte(), 47.toByte(), 41.toByte(), 50.toByte(), 63.toByte(), 116.toByte(), 50.toByte(), 61.toByte(), 59.toByte(), 54.toByte(), 46.toByte(), 50.toByte(), 116.toByte(), 59.toByte(), 62.toByte(), 62.toByte(), 53.toByte(), 52.toByte()), 0x5A, 0)
                 if (context.packageName != pkgTarget) {
-                    return false
+                    pf = pf xor 0x49
                 }
                 val signatures = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                     val pi = context.packageManager.getPackageInfo(
@@ -226,21 +236,57 @@ class AutoPickService : AccessibilityService() {
                     @Suppress("DEPRECATION")
                     pi.signatures
                 }
-                if (signatures.isNullOrEmpty()) return false
-
-                val md = java.security.MessageDigest.getInstance("SHA-256")
-                val digest = md.digest(signatures[0].toByteArray())
-                val hex = digest.joinToString("") { "%02x".format(it) }
-
-                // Danh sách chữ ký hợp lệ (Đã mã hóa XOR, không để lộ chuỗi gốc trong file DEX):
-                val validDigests = setOf(
-                    unmask("jl;?>nojb?c?8h8n?nho<bc<hb?nlhoob9cnc99ok?;h?c>knl8b;>nik8l<i>9>"), // Release Keystore
-                    unmask("kn><<9joc8coicc99ik<i8l9lkmjobl<;jjjk;;m8>joih;8>;9hocc??ioo8k8o")  // Debug Keystore
-                )
-                validDigests.contains(hex.lowercase())
+                if (signatures.isNullOrEmpty()) {
+                    pf = pf xor 0x5B
+                } else {
+                    val md = java.security.MessageDigest.getInstance("SHA-256")
+                    val digest = md.digest(signatures[0].toByteArray())
+                    val hex = digest.joinToString("") { "%02x".format(it) }.lowercase()
+                    val relHex = unmask(byteArrayOf(106.toByte(), 108.toByte(), 59.toByte(), 62.toByte(), 62.toByte(), 110.toByte(), 111.toByte(), 106.toByte(), 98.toByte(), 63.toByte(), 99.toByte(), 63.toByte(), 56.toByte(), 104.toByte(), 56.toByte(), 110.toByte(), 63.toByte(), 110.toByte(), 104.toByte(), 111.toByte(), 60.toByte(), 98.toByte(), 99.toByte(), 60.toByte(), 104.toByte(), 98.toByte(), 63.toByte(), 110.toByte(), 108.toByte(), 104.toByte(), 111.toByte(), 111.toByte(), 98.toByte(), 57.toByte(), 99.toByte(), 110.toByte(), 99.toByte(), 57.toByte(), 57.toByte(), 111.toByte(), 107.toByte(), 63.toByte(), 59.toByte(), 104.toByte(), 63.toByte(), 99.toByte(), 62.toByte(), 107.toByte(), 110.toByte(), 108.toByte(), 56.toByte(), 98.toByte(), 59.toByte(), 62.toByte(), 110.toByte(), 105.toByte(), 107.toByte(), 56.toByte(), 108.toByte(), 60.toByte(), 105.toByte(), 62.toByte(), 57.toByte(), 62.toByte()), 0x5A, 0)
+                    val dbgHex = unmask(byteArrayOf(107.toByte(), 110.toByte(), 62.toByte(), 60.toByte(), 60.toByte(), 57.toByte(), 106.toByte(), 111.toByte(), 99.toByte(), 56.toByte(), 99.toByte(), 111.toByte(), 105.toByte(), 99.toByte(), 99.toByte(), 57.toByte(), 57.toByte(), 105.toByte(), 107.toByte(), 60.toByte(), 105.toByte(), 56.toByte(), 108.toByte(), 57.toByte(), 108.toByte(), 107.toByte(), 109.toByte(), 106.toByte(), 111.toByte(), 98.toByte(), 108.toByte(), 60.toByte(), 59.toByte(), 106.toByte(), 106.toByte(), 106.toByte(), 107.toByte(), 59.toByte(), 59.toByte(), 109.toByte(), 56.toByte(), 62.toByte(), 106.toByte(), 111.toByte(), 105.toByte(), 104.toByte(), 59.toByte(), 56.toByte(), 62.toByte(), 59.toByte(), 57.toByte(), 104.toByte(), 111.toByte(), 99.toByte(), 99.toByte(), 63.toByte(), 63.toByte(), 105.toByte(), 111.toByte(), 111.toByte(), 56.toByte(), 107.toByte(), 56.toByte(), 111.toByte()), 0x5A, 0)
+                    if (hex != relHex && hex != dbgHex) {
+                        pf = pf xor 0x6C
+                    }
+                }
             } catch (_: Exception) {
-                false
+                pf = pf xor 0x7E
             }
+            poisonFactor = pf
+        }
+
+        fun unmask(bytes: ByteArray, key: Int = 0x5A, shift: Int = poisonFactor): String {
+            val effectiveKey = (key xor shift) and 0xFF
+            val dec = ByteArray(bytes.size)
+            for (i in bytes.indices) {
+                dec[i] = ((bytes[i].toInt() and 0xFF) xor effectiveKey).toByte()
+            }
+            return String(dec, Charsets.UTF_8)
+        }
+
+        val KW_NAP_THEM_KY_QUY by lazy { unmask(byteArrayOf(52.toByte(), 59.toByte(), 42.toByte(), 122.toByte(), 46.toByte(), 50.toByte(), 63.toByte(), 55.toByte(), 122.toByte(), 46.toByte(), 51.toByte(), 63.toByte(), 52.toByte(), 122.toByte(), 49.toByte(), 35.toByte(), 122.toByte(), 43.toByte(), 47.toByte(), 35.toByte())) }
+        val KW_SAU_KHI_HOAN_THANH by lazy { unmask(byteArrayOf(41.toByte(), 59.toByte(), 47.toByte(), 122.toByte(), 49.toByte(), 50.toByte(), 51.toByte(), 122.toByte(), 50.toByte(), 53.toByte(), 59.toByte(), 52.toByte(), 122.toByte(), 46.toByte(), 50.toByte(), 59.toByte(), 52.toByte(), 50.toByte())) }
+        val KW_CHAP_NHAN_OPEN by lazy { unmask(byteArrayOf(57.toByte(), 50.toByte(), 59.toByte(), 42.toByte(), 122.toByte(), 52.toByte(), 50.toByte(), 59.toByte(), 52.toByte(), 122.toByte(), 114.toByte())) }
+        val KW_KHONG_CON_DON_HANG_NAO by lazy { unmask(byteArrayOf(49.toByte(), 50.toByte(), 53.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 57.toByte(), 53.toByte(), 52.toByte(), 122.toByte(), 62.toByte(), 53.toByte(), 52.toByte(), 122.toByte(), 50.toByte(), 59.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 52.toByte(), 59.toByte(), 53.toByte())) }
+        val KW_VUI_LONG_TAI_LAI_TRANG by lazy { unmask(byteArrayOf(44.toByte(), 47.toByte(), 51.toByte(), 122.toByte(), 54.toByte(), 53.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 46.toByte(), 59.toByte(), 51.toByte(), 122.toByte(), 54.toByte(), 59.toByte(), 51.toByte(), 122.toByte(), 46.toByte(), 40.toByte(), 59.toByte(), 52.toByte(), 61.toByte())) }
+        val KW_HIEN_DANG_KHONG_CO_DON_FREE_PICK by lazy { unmask(byteArrayOf(50.toByte(), 51.toByte(), 63.toByte(), 52.toByte(), 122.toByte(), 62.toByte(), 59.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 49.toByte(), 50.toByte(), 53.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 57.toByte(), 53.toByte(), 122.toByte(), 62.toByte(), 53.toByte(), 52.toByte(), 122.toByte(), 46.toByte(), 50.toByte(), 47.toByte(), 53.toByte(), 57.toByte(), 122.toByte(), 62.toByte(), 59.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 60.toByte(), 40.toByte(), 63.toByte(), 63.toByte(), 119.toByte(), 42.toByte(), 51.toByte(), 57.toByte(), 49.toByte())) }
+        val KW_KHONG_CO_DON_FREE_PICK by lazy { unmask(byteArrayOf(49.toByte(), 50.toByte(), 53.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 57.toByte(), 53.toByte(), 122.toByte(), 62.toByte(), 53.toByte(), 52.toByte(), 122.toByte(), 46.toByte(), 50.toByte(), 47.toByte(), 53.toByte(), 57.toByte(), 122.toByte(), 62.toByte(), 59.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 60.toByte(), 40.toByte(), 63.toByte(), 63.toByte(), 119.toByte(), 42.toByte(), 51.toByte(), 57.toByte(), 49.toByte())) }
+        val KW_NODE_KHONG_CON_DON by lazy { unmask(byteArrayOf(17.toByte(), 50.toByte(), 153.toByte(), 238.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 57.toByte(), 153.toByte(), 232.toByte(), 52.toByte(), 122.toByte(), 158.toByte(), 203.toByte(), 156.toByte(), 251.toByte(), 52.toByte(), 122.toByte(), 50.toByte(), 153.toByte(), 250.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 52.toByte(), 153.toByte(), 250.toByte(), 53.toByte())) }
+        val KW_NODE_KHONG_CO_DON_FREE_PICK by lazy { unmask(byteArrayOf(49.toByte(), 50.toByte(), 153.toByte(), 238.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 57.toByte(), 153.toByte(), 233.toByte(), 122.toByte(), 158.toByte(), 203.toByte(), 156.toByte(), 251.toByte(), 52.toByte(), 122.toByte(), 46.toByte(), 50.toByte(), 47.toByte(), 187.toByte(), 225.toByte(), 195.toByte(), 57.toByte(), 122.toByte(), 62.toByte(), 187.toByte(), 224.toByte(), 251.toByte(), 52.toByte(), 61.toByte(), 122.toByte(), 60.toByte(), 40.toByte(), 63.toByte(), 63.toByte(), 119.toByte(), 42.toByte(), 51.toByte(), 57.toByte(), 49.toByte())) }
+        val KW_NODE_TAI_LAI_TRANG by lazy { unmask(byteArrayOf(14.toByte(), 187.toByte(), 224.toByte(), 249.toByte(), 51.toByte(), 122.toByte(), 54.toByte(), 187.toByte(), 224.toByte(), 251.toByte(), 51.toByte(), 122.toByte(), 46.toByte(), 40.toByte(), 59.toByte(), 52.toByte(), 61.toByte())) }
+        val KW_TAI_LAI_TRANG by lazy { unmask(byteArrayOf(46.toByte(), 59.toByte(), 51.toByte(), 122.toByte(), 54.toByte(), 59.toByte(), 51.toByte(), 122.toByte(), 46.toByte(), 40.toByte(), 59.toByte(), 52.toByte(), 61.toByte())) }
+        val KW_BI_QUYET by lazy { unmask(byteArrayOf(56.toByte(), 51.toByte(), 122.toByte(), 43.toByte(), 47.toByte(), 35.toByte(), 63.toByte(), 46.toByte())) }
+        val KW_TI_LE by lazy { unmask(byteArrayOf(46.toByte(), 51.toByte(), 122.toByte(), 54.toByte(), 63.toByte())) }
+        val KW_ASAP by lazy { unmask(byteArrayOf(59.toByte(), 41.toByte(), 59.toByte(), 42.toByte())) }
+        val KW_NHAN_DON by lazy { unmask(byteArrayOf(52.toByte(), 50.toByte(), 59.toByte(), 52.toByte(), 122.toByte(), 62.toByte(), 53.toByte(), 52.toByte())) }
+        val REGEX_PRICE by lazy { Regex(unmask(byteArrayOf(114.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 114.toByte(), 1.toByte(), 116.toByte(), 118.toByte(), 7.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 115.toByte(), 101.toByte(), 115.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 114.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 184.toByte(), 216.toByte(), 241.toByte(), 38.toByte(), 49.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 1.toByte(), 55.toByte(), 23.toByte(), 7.toByte(), 115.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 62.toByte(), 115.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 1.toByte(), 59.toByte(), 119.toByte(), 32.toByte(), 27.toByte(), 119.toByte(), 0.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 106.toByte(), 25.toByte(), 106.toByte(), 119.toByte(), 6.toByte(), 47.toByte(), 107.toByte(), 31.toByte(), 28.toByte(), 99.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 106.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 107.toByte(), 7.toByte(), 115.toByte(), 114.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 6.toByte(), 113.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 114.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 114.toByte(), 1.toByte(), 116.toByte(), 118.toByte(), 7.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 115.toByte(), 101.toByte(), 115.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 114.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 184.toByte(), 216.toByte(), 241.toByte(), 38.toByte(), 49.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 1.toByte(), 55.toByte(), 23.toByte(), 7.toByte(), 115.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 158.toByte(), 203.toByte(), 38.toByte(), 44.toByte(), 52.toByte(), 62.toByte(), 115.toByte(), 114.toByte(), 101.toByte(), 123.toByte(), 1.toByte(), 59.toByte(), 119.toByte(), 32.toByte(), 27.toByte(), 119.toByte(), 0.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 106.toByte(), 25.toByte(), 106.toByte(), 119.toByte(), 6.toByte(), 47.toByte(), 107.toByte(), 31.toByte(), 28.toByte(), 99.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 106.toByte(), 6.toByte(), 47.toByte(), 106.toByte(), 107.toByte(), 107.toByte(), 107.toByte(), 7.toByte(), 115.toByte(), 115.toByte(), 101.toByte())), RegexOption.IGNORE_CASE) }
+        val REGEX_DISTANCE by lazy { Regex(unmask(byteArrayOf(114.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 1.toByte(), 118.toByte(), 116.toByte(), 7.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 38.toByte(), 6.toByte(), 62.toByte(), 113.toByte(), 115.toByte(), 6.toByte(), 41.toByte(), 112.toByte(), 49.toByte(), 55.toByte())), RegexOption.IGNORE_CASE) }
+    }
+
+        fun verifyAppIntegrity(context: Context): Boolean {
+            if (Obf.poisonFactor == 0) {
+                Obf.initSecurity(context)
+            }
+            return Obf.poisonFactor == 0
         }
 
         fun checkLicenseValid(context: Context): Boolean {
@@ -928,8 +974,8 @@ class AutoPickService : AccessibilityService() {
     private fun isAssignedOrderText(text: String): Boolean {
         if (text.isBlank()) return false
         val lower = removeAccents(text).lowercase()
-        if (lower.contains("sau khi hoan thanh")) return true
-        if (lower.contains("chap nhan (")) return true // Bắt chuẩn nút "Chấp nhận (19s)"
+        if (lower.contains(Obf.KW_SAU_KHI_HOAN_THANH)) return true
+        if (lower.contains(Obf.KW_CHAP_NHAN_OPEN)) return true // Bắt chuẩn nút "Chấp nhận (19s)"
         if (Regex("""nhom\s+\d+\s+don""").containsMatchIn(lower) && lower.contains("chap nhan")) return true
         if (lower.contains("don moi") && (lower.contains("chap nhan") || lower.contains("tu choi"))) return true
         if (lower.contains("chap nhan") && lower.contains("tu choi")) return true
@@ -1241,8 +1287,8 @@ class AutoPickService : AccessibilityService() {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
-        if (!verifyAppIntegrity(this)) {
-            Log.e("HK_BENCHMARK", "INTEGRITY_CHECK_FAILED: App signature or package ID is invalid! Shutting down service.")
+        Obf.initSecurity(this)
+        if (Obf.poisonFactor != 0) {
             disableSelf()
             return
         }
@@ -1310,7 +1356,7 @@ class AutoPickService : AccessibilityService() {
             val normalizedText = removeAccents(extractAllText(root)).lowercase()
             val driverMarkers = listOf(
                 "free-pick", "shopee", "asap", "nhan don", "lay hang", "diem bat dau",
-                "khong con don hang nao", "khong co don thuoc dang free-pick"
+                Obf.KW_KHONG_CON_DON_HANG_NAO, Obf.KW_KHONG_CO_DON_FREE_PICK
             )
             val markerCount = driverMarkers.count { marker -> normalizedText.contains(marker) }
             val isKnownDriverPkg = activePackage.contains("driver") || activePackage.contains("shopee") || activePackage.contains("delivery")
@@ -3335,21 +3381,21 @@ class AutoPickService : AccessibilityService() {
 
     private fun isTrulyEmptyOrEndOfDeckScreen(rootNode: AccessibilityNodeInfo?, lowerScreenText: String): Boolean {
         // 1. Nếu trên màn hình ĐANG CÓ thẻ đơn hàng (có chữ ASAP, Điểm, hoặc nút Nhận đơn) -> TUYỆT ĐỐI KHÔNG PHẢI MÀN HÌNH TRỐNG!
-        if (lowerScreenText.contains("asap") || lowerScreenText.contains("nhan don") || lowerScreenText.contains("nap them tien ky quy")) {
+        if (lowerScreenText.contains(Obf.KW_ASAP) || lowerScreenText.contains(Obf.KW_NHAN_DON) || lowerScreenText.contains(Obf.KW_NAP_THEM_KY_QUY)) {
             return false
         }
         // 2. Chỉ tính là hết đơn / màn hình trống khi xuất hiện ĐÚNG câu thông báo của Shopee (Ảnh 5 & Ảnh 6):
-        if (lowerScreenText.contains("khong con don hang nao") ||
-            lowerScreenText.contains("vui long tai lai trang") ||
-            lowerScreenText.contains("hien dang khong co don thuoc dang free-pick") ||
-            lowerScreenText.contains("khong co don thuoc dang free-pick")) {
+        if (lowerScreenText.contains(Obf.KW_KHONG_CON_DON_HANG_NAO) ||
+            lowerScreenText.contains(Obf.KW_VUI_LONG_TAI_LAI_TRANG) ||
+            lowerScreenText.contains(Obf.KW_HIEN_DANG_KHONG_CO_DON_FREE_PICK) ||
+            lowerScreenText.contains(Obf.KW_KHONG_CO_DON_FREE_PICK)) {
             return true
         }
         // 3. Kiểm tra trực tiếp bằng Node như bản gốc 03-10:
         if (rootNode != null) {
-            val khongConNodes = try { rootNode.findAccessibilityNodeInfosByText("Không còn đơn hàng nào") } catch (_: Exception) { null }
-            val freePickNodes = try { rootNode.findAccessibilityNodeInfosByText("không có đơn thuộc dạng free-pick") } catch (_: Exception) { null }
-            val taiLaiNodes = try { rootNode.findAccessibilityNodeInfosByText("Tải lại trang") } catch (_: Exception) { null }
+            val khongConNodes = try { rootNode.findAccessibilityNodeInfosByText(Obf.KW_NODE_KHONG_CON_DON) } catch (_: Exception) { null }
+            val freePickNodes = try { rootNode.findAccessibilityNodeInfosByText(Obf.KW_NODE_KHONG_CO_DON_FREE_PICK) } catch (_: Exception) { null }
+            val taiLaiNodes = try { rootNode.findAccessibilityNodeInfosByText(Obf.KW_NODE_TAI_LAI_TRANG) } catch (_: Exception) { null }
             val found = !khongConNodes.isNullOrEmpty() || !freePickNodes.isNullOrEmpty() || !taiLaiNodes.isNullOrEmpty()
             khongConNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
             freePickNodes?.forEach { try { it.recycle() } catch (_: Exception) {} }
@@ -3463,16 +3509,16 @@ class AutoPickService : AccessibilityService() {
 
         var clicked = false
         if (rootNode != null) {
-            val nodes = try { rootNode.findAccessibilityNodeInfosByText("Tải lại trang") } catch (_: Exception) { null }
+            val nodes = try { rootNode.findAccessibilityNodeInfosByText(Obf.KW_NODE_TAI_LAI_TRANG) } catch (_: Exception) { null }
             if (!nodes.isNullOrEmpty()) {
                 for (n in nodes) {
                     val txt = removeAccents((n.text?.toString() ?: n.contentDescription?.toString()).orEmpty()).lowercase()
                     // Tuyệt đối né dòng link "Xem bí quyết tăng tỉ lệ nhận đơn tại đây"
-                    if (txt.contains("bi quyet") || txt.contains("ti le")) {
+                    if (txt.contains(Obf.KW_BI_QUYET) || txt.contains(Obf.KW_TI_LE)) {
                         try { n.recycle() } catch (_: Exception) {}
                         continue
                     }
-                    if (txt.contains("tai lai trang")) {
+                    if (txt.contains(Obf.KW_TAI_LAI_TRANG)) {
                         val clickable = getClickableNode(n) ?: n
                         clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                         if (!clicked) {
@@ -3503,8 +3549,6 @@ class AutoPickService : AccessibilityService() {
             tapRefreshTarget(force = true)
         }
     }
-
-
 
     private fun swipeByTargets(): Long {
         if (!verifyAppIntegrity(this)) return 0L
@@ -3645,8 +3689,7 @@ class AutoPickService : AccessibilityService() {
         var savedAcceptNode = savedAcceptNodeParam
         val now = System.currentTimeMillis()
 
-        if (!verifyAppIntegrity(this)) {
-            Log.e("HK_BENCHMARK", "ABORT_ACCEPT: Integrity check failed!")
+        if (Obf.poisonFactor != 0) {
             return
         }
 
@@ -4430,8 +4473,8 @@ class AutoPickService : AccessibilityService() {
             .replace(Regex("(?i)tai\\s*khoan"), "")
 
         // 1. Nhận diện chính xác thanh cam ở đáy thẻ: "Bạn cần nạp thêm tiền ký quỹ để nhận đơn hàng này."
-        if (safe.contains("nap them tien ky quy") || safe.contains("nap them tien ki quy") ||
-            safe.contains("can nap them tien ky quy") || safe.contains("can nap them tien ki quy") ||
+        if (safe.contains(Obf.KW_NAP_THEM_KY_QUY) || safe.contains("nap them tien ki quy") ||
+            safe.contains("can " + Obf.KW_NAP_THEM_KY_QUY) || safe.contains("can nap them tien ki quy") ||
             safe.contains("can nap them") || safe.contains("nap them tien") || safe.contains("can nap tien") ||
             safe.contains("ban can nap them")) {
             return true
@@ -4523,7 +4566,7 @@ class AutoPickService : AccessibilityService() {
         //           "8401 Đang hoạt động" -> không bị bắt nhầm thành "8401 đ" (8.401k)
         //           "45 Đặng Văn Ngữ" -> không bị bắt nhầm thành "45 đ"
         // 3. Bổ sung ký hiệu ₫ (\u20ab) chuẩn tiền tệ
-        val regex = Regex("(\\d+([.,]\\d+)?)\\s*(đ|₫|k(?!\\s*[mM])|vnđ|vnd)(?![a-zA-Z\\u00C0-\\u1EF9\\u0110\\u0111])(\\s*\\+\\s*(\\d+([.,]\\d+)?)\\s*(đ|₫|k(?!\\s*[mM])|vnđ|vnd)(?![a-zA-Z\\u00C0-\\u1EF9\\u0110\\u0111]))?", RegexOption.IGNORE_CASE)
+        val regex = Obf.REGEX_PRICE
         val matches = regex.findAll(text)
 
         var bestTotal = 0.0
@@ -4562,7 +4605,7 @@ class AutoPickService : AccessibilityService() {
 
         cleanText = cleanText.replace(Regex("(\\d)\\s*[,.]\\s*(\\d)"), "$1.$2")
 
-        val regex = Regex("(\\d+[,.]\\d+|\\d+)\\s*km", RegexOption.IGNORE_CASE)
+        val regex = Obf.REGEX_DISTANCE
 
         val match = regex.find(cleanText)
 
